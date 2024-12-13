@@ -82,7 +82,7 @@ project_catalog/
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/axiom-strategies/project-catalog.git
+git clone https://github.com/callum-doty/project-catalog.git
 cd project_catalog
 ```
 
