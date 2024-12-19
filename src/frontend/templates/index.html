@@ -1,0 +1,105 @@
+{% extends "base.html" %} {% block title %}Project Catalog - Asset Management{%
+endblock %} {% block main_content %}
+<section class="content-card">
+  <h2 class="section-header">Search Assets</h2>
+  <form method="GET" action="{{ url_for('home') }}">
+    <div class="form-group">
+      <input
+        type="text"
+        name="search"
+        value="{{ search_query }}"
+        placeholder="Search by campaign name, client, or theme..."
+        aria-label="Search assets"
+      />
+      <button type="submit" class="btn">Search</button>
+    </div>
+  </form>
+</section>
+
+<section class="content-card">
+  <h2 class="section-header">Upload New Asset</h2>
+  <form
+    method="POST"
+    action="{{ url_for('upload_file') }}"
+    enctype="multipart/form-data"
+  >
+    <div class="form-group">
+      <label for="file">Select File</label>
+      <input type="file" id="file" name="file" required />
+      <small>Supported formats: PDF, PSD, AI, JPG, PNG</small>
+    </div>
+
+    <div class="form-group">
+      <label for="campaign_name">Campaign Name</label>
+      <input
+        type="text"
+        id="campaign_name"
+        name="campaign_name"
+        required
+        placeholder="Enter campaign name"
+      />
+    </div>
+
+    <div class="form-group">
+      <label for="client_name">Client Name</label>
+      <input
+        type="text"
+        id="client_name"
+        name="client_name"
+        required
+        placeholder="Enter client name"
+      />
+    </div>
+
+    <div class="form-group">
+      <label for="color_scheme">Color Scheme</label>
+      <input
+        type="text"
+        id="color_scheme"
+        name="color_scheme"
+        placeholder="e.g., Blue and Gold"
+      />
+    </div>
+
+    <div class="form-group">
+      <label for="theme">Theme</label>
+      <input
+        type="text"
+        id="theme"
+        name="theme"
+        placeholder="e.g., Modern, Corporate, Festive"
+      />
+    </div>
+
+    <button type="submit" class="btn">Upload Asset</button>
+  </form>
+</section>
+
+<section class="content-card">
+  <h2 class="section-header">Assets Library</h2>
+  {% if assets %}
+  <div class="asset-grid">
+    {% for asset in assets %}
+    <div class="asset-card">
+      <h3>{{ asset.original_filename }}</h3>
+      <div class="asset-details">
+        <p><strong>Campaign:</strong> {{ asset.campaign_name }}</p>
+        <p><strong>Client:</strong> {{ asset.client_name }}</p>
+        {% if asset.theme %}
+        <p><strong>Theme:</strong> {{ asset.theme }}</p>
+        {% endif %}
+        <p>
+          <strong>Uploaded:</strong> {{ asset.created_at.strftime('%Y-%m-%d') }}
+        </p>
+      </div>
+      <a href="{{ url_for('asset_detail', id=asset.id) }}" class="btn"
+        >View Details</a
+      >
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p>No assets found. Upload your first asset using the form above.</p>
+  {% endif %}
+</section>
+{% endblock %}

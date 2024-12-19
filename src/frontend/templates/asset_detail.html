@@ -1,0 +1,22 @@
+{% extends "base.html" %} {% block content %}
+<div class="container">
+  <h1>{{ asset.filename }}</h1>
+
+  <div class="asset-details">
+    <p><strong>Campaign:</strong> {{ asset.campaign_name }}</p>
+    <p><strong>Client:</strong> {{ asset.client_name }}</p>
+    <p><strong>Color Scheme:</strong> {{ asset.color_scheme }}</p>
+    <p><strong>Theme:</strong> {{ asset.theme }}</p>
+    <p>
+      <strong>Created:</strong> {{ asset.created_at.strftime('%Y-%m-%d
+      %H:%M:%S') }}
+    </p>
+    <p>
+      <strong>Last Updated:</strong> {{ asset.updated_at.strftime('%Y-%m-%d
+      %H:%M:%S') }}
+    </p>
+  </div>
+
+  <a href="{{ url_for('main.index') }}" class="btn">Back to List</a>
+</div>
+{% endblock %}

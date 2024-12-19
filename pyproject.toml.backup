@@ -3,7 +3,6 @@ name = "project_catalog"
 version = "0.1.0"
 description = "A CNN-based document processing and classification system"
 authors = ["Callum Doty <doty.callum9@gmail.com>"]
-readme = "README.md"
 packages = [{include = "src"}]
 
 [tool.poetry.dependencies]
@@ -13,6 +12,8 @@ sqlalchemy = "^2.0.23"
 psycopg2-binary = "^2.9.9"
 python-dotenv = "^1.0.0"
 dropbox = "^11.36.2"
+torch = "^2.1.1"
+torchvision = "^0.16.1"
 pillow = "^10.1.0"
 redis = "^5.0.1"
 flask-sqlalchemy = "^3.1.1"
@@ -28,13 +29,13 @@ flake8 = "^7.0.0"
 pre-commit = "^3.5.0"
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 line-length = 88
-target-version = ["py38"]
-include = "\\.pyi?$"
+target-version = ['py38']
+include = '\.pyi?$'
 
 [tool.isort]
 profile = "black"
@@ -46,6 +47,6 @@ ensure_newline_before_comments = true
 line_length = 88
 
 [tool.pytest]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
+testpaths = "tests"
+python_files = "test_*.py"
 addopts = "-ra -q"
