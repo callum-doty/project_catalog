@@ -97,21 +97,23 @@ def dropbox_auth_finish():
 @app.route('/test-dropbox')
 def test_dropbox():
     try:
-        logger.debug("Initializing DropboxHandler")
+        logger.debug("Starting Dropbox test")
         handler = DropboxHandler()
 
         # Test connection
+        logger.debug("Testing connection...")
         if not handler.test_connection():
-            logger.error("Failed to connect to Dropbox")
+            logger.error("Failed Dropbox connection test")
             return jsonify({"error": "Failed to connect to Dropbox"}), 500
 
         # Test listing files
         folder_path = os.getenv('DROPBOX_FOLDER_PATH', '')
-        logger.debug(f"Listing files in path: {folder_path}")
+        logger.debug(f"Testing file listing in path: {folder_path}")
         files = handler.list_documents(folder_path)
 
         return jsonify({
             "status": "success",
+            "folder_path": folder_path,
             "files": [{
                 "name": f.name,
                 "size": f.size,
