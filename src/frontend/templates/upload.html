@@ -1,0 +1,63 @@
+# src/frontend/templates/upload.html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Upload Document</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      .upload-form {
+        border: 1px solid #ccc;
+        padding: 20px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+      }
+      .document-list {
+        list-style: none;
+        padding: 0;
+      }
+      .document-list li {
+        border-bottom: 1px solid #eee;
+        padding: 10px 0;
+      }
+      .error {
+        color: red;
+        margin-bottom: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Upload Document</h2>
+    <div class="upload-form">
+      <form
+        action="{{ url_for('upload_file') }}"
+        method="post"
+        enctype="multipart/form-data"
+      >
+        <input type="file" name="file" accept=".pdf,.psd,.ai" required />
+        <input type="submit" value="Upload" />
+      </form>
+    </div>
+
+    <h3>Uploaded Documents</h3>
+    {% if documents %}
+    <ul class="document-list">
+      {% for document in documents %}
+      <li>
+        {{ document.filename }} ({{ document.file_size }} bytes) - Status: {{
+        document.status }} -
+        <a href="{{ url_for('download_file', document_id=document.id) }}"
+          >Download</a
+        >
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p>No documents uploaded yet.</p>
+    {% endif %}
+  </body>
+</html>
