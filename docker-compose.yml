@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    env_file: .env
+    ports:
+      - "5001:5000"
+    environment:
+      - FLASK_APP=app.py
+      - DATABASE_URL=postgresql://custom_user:strong_password@db:5432/catalog_db
+      - FLASK_ENV=production
+      - MINIO_ACCESS_KEY=minioaccess
+      - MINIO_SECRET_KEY=miniosecret
+      - MINIO_BUCKET=documents
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - NO_PROXY=minio,redis,db  
+      - HTTP_PROXY=              
+      - HTTPS_PROXY=
+    volumes:
+      - .:/app
+    depends_on:
+      - db
+      - redis
+      - minio
+
+  db:
+    image: postgres:14
+    environment:
+      POSTGRES_DB: catalog_db
+      POSTGRES_USER: custom_user
+      POSTGRES_PASSWORD: strong_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U custom_user -d catalog_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:6
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ACCESS_KEY=minioaccess
+      - MINIO_SECRET_KEY=miniosecret
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  celery:
+    build: .
+    command: celery -A tasks.celery_app worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/catalog_db
+      - MINIO_ACCESS_KEY=minioaccess
+      - MINIO_SECRET_KEY=miniosecret
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+    depends_on:
+      - web
+      - redis
+      - db
+      - minio
+
+volumes:
+  postgres_data:
+  minio_data:
