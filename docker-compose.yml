@@ -7,16 +7,14 @@ services:
     ports:
       - "5001:5000"
     environment:
-      - FLASK_APP=app.py
+      - FLASK_APP=wsgi.py
+      - SQLALCHEMY_DATABASE_URI=${DATABASE_URL}
       - DATABASE_URL=postgresql://custom_user:strong_password@db:5432/catalog_db
       - FLASK_ENV=production
       - MINIO_ACCESS_KEY=minioaccess
       - MINIO_SECRET_KEY=miniosecret
       - MINIO_BUCKET=documents
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
-      - NO_PROXY=minio,redis,db  
-      - HTTP_PROXY=              
-      - HTTPS_PROXY=
     volumes:
       - .:/app
     depends_on:

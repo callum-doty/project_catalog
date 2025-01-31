@@ -18,10 +18,20 @@ from pdf2image import convert_from_path
 
 class DocumentProcessor(Task):
     abstract = True
+    _storage = None
+    _llm_service = None
     
-    def __init__(self):
-        self.storage = MinIOStorage()
-        self.llm_service = LLMService()
+    @property
+    def storage(self):
+        if self._storage is None:
+            self._storage = MinIOStorage()
+        return self._storage
+    
+    @property
+    def llm_service(self):
+        if self._llm_service is None:
+            self._llm_service = LLMService()
+        return self._llm_service
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         document_id = kwargs.get('document_id')

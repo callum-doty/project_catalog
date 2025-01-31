@@ -5,7 +5,7 @@ from urllib3 import PoolManager
 
 class MinIOStorage:
     def __init__(self):
-        http_client = PoolManager(trust_env=False)
+        http_client = PoolManager(timeout=5.0, retries=3)
         print("Initializing Minio client with:")
         print(f"Endpoint: minio:9000")
         print(f"Access Key: {os.getenv('MINIO_ACCESS_KEY', 'minioaccess')}")
@@ -13,7 +13,8 @@ class MinIOStorage:
             endpoint="minio:9000",
             access_key=os.getenv("MINIO_ACCESS_KEY", "minioaccess"),
             secret_key=os.getenv("MINIO_SECRET_KEY", "miniosecret"),
-            secure=False
+            secure=False,
+            http_client=http_client
         )
 
         self.bucket = os.getenv("MINIO_BUCKET", "documents")

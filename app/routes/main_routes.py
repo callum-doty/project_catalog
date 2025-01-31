@@ -6,14 +6,22 @@ from app.services.storage_service import MinIOStorage
 from app.extensions import db 
 from app.models.models import Document
 from tasks.document_tasks import process_document
+from flask import jsonify
+from sqlalchemy import text
+
 
 main_routes = Blueprint('main_routes', __name__)
 storage = MinIOStorage()
 
 @main_routes.route('/')
 def index():
-    documents = Document.query.order_by(Document.upload_date.desc()).limit(10).all()
-    return render_template('index.html', documents=documents)
+    try:
+        documents = Document.query.order_by(Document.upload_date.desc()).limit(10).all()
+        return render_template('index.html', documents=documents)
+    except Exception as e:
+        # Log the error but return empty list
+        current_app.logger.error(f"Error fetching documents: {str(e)}")
+        return render_template('index.html', documents=[])
 
 @main_routes.route('/upload', methods=['POST'])
 def upload_file():
@@ -51,3 +59,18 @@ def upload_file():
     except Exception as e:
         flash(f'Error uploading file: {str(e)}', 'error')
         return redirect(url_for('main_routes.index'))
+
+
+@main_routes.route('/health')
+def health_check():
+    try:
+        db.session.execute(text('SELECT 1'))
+        db.session.commit()
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'tables': ['documents', 'batch_jobs', 'llm_analysis', 'extracted_text', 
+                      'design_elements', 'classifications', 'llm_keywords', 'clients']
+        })
+    except Exception as e:
+        return jsonify({'status': 'unhealthy', 'database': str(e)}), 500

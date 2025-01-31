@@ -6,7 +6,11 @@ from typing import Dict, Any
 class LLMService:
     def __init__(self):
         self.api_key = os.getenv("CLAUDE_API_KEY")
-        self.client = Anthropic(api_key=self.api_key)
+        self.client = Anthropic(
+            api_key=self.api_key,
+            base_url="https://api.anthropic.com",
+            timeout=60.0,
+        )
 
     def analyze_text(self, text: str, prompt_template: str) -> Dict[Any, Any]:
         """Analyze text using Claude API"""
