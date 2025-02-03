@@ -15,6 +15,7 @@ import json
 from PIL import Image
 import pytesseract
 from pdf2image import convert_from_path
+from app.services.llm_parser import LLMResponseParser
 
 class DocumentProcessor(Task):
     abstract = True
@@ -42,56 +43,25 @@ class DocumentProcessor(Task):
                 db.session.commit()
         logger.error(f"Task {task_id} failed: {str(exc)}", exc_info=einfo)
 
-@celery_app.task(bind=True, base=DocumentProcessor)
-@handle_task_failure
-def process_document(self, filename: str, minio_path: str, document_id: int):
-    """Process uploaded document through the pipeline"""
-    doc = Document.query.get(document_id)
-    doc.status = TASK_STATUSES['PROCESSING']
-    db.session.commit()
-
-    try:
-        # Download file from MinIO
-        temp_path = f"/tmp/{filename}"
-        self.storage.download_file(filename, temp_path)
-
-        # Extract text based on file type
-        file_extension = filename.lower().split('.')[-1]
-        if file_extension == 'pdf':
-            extracted_text = extract_text_from_pdf(temp_path)
-        else:
-            extracted_text = extract_text_from_image(temp_path)
-
-        # Store extracted text
-        text_entry = ExtractedText(
-            document_id=document_id,
-            text_content=extracted_text,
-            confidence=0.9,  # You might want to adjust this
-            extraction_date=datetime.utcnow()
-        )
-        db.session.add(text_entry)
-
-        # Get LLM analysis
-        analysis_result = analyze_document.delay(filename, extracted_text, document_id)
-        analysis_result.get()  # Wait for analysis to complete
-
-        # Update document status
-        doc.status = TASK_STATUSES['COMPLETED']
-        db.session.commit()
-
-    finally:
-        # Cleanup
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
 
 def extract_text_from_pdf(filepath: str) -> str:
     """Extract text from PDF using pdf2image and pytesseract"""
     try:
-        pages = convert_from_path(filepath)
-        text = []
-        for page in pages:
-            text.append(pytesseract.image_to_string(page))
-        return "\n".join(text)
+        # Convert PDF pages to images
+        images = convert_from_path(filepath)
+        
+        # Extract text from each page
+        text_parts = []
+        for i, image in enumerate(images):
+            print(f"Processing PDF page {i+1}/{len(images)}")
+            text = pytesseract.image_to_string(image)
+            text_parts.append(text)
+            
+        # Combine text from all pages
+        full_text = "\n\n".join(text_parts)
+        print(f"Extracted {len(full_text)} characters from PDF")
+        return full_text
+        
     except Exception as e:
         logger.error(f"PDF text extraction failed: {str(e)}")
         raise
@@ -99,72 +69,95 @@ def extract_text_from_pdf(filepath: str) -> str:
 def extract_text_from_image(filepath: str) -> str:
     """Extract text from image using pytesseract"""
     try:
+        # Open and process image
         image = Image.open(filepath)
-        return pytesseract.image_to_string(image)
+        text = pytesseract.image_to_string(image)
+        print(f"Extracted {len(text)} characters from image")
+        return text
+        
     except Exception as e:
         logger.error(f"Image text extraction failed: {str(e)}")
         raise
 
-@celery_app.task
-@handle_task_failure
-def analyze_document(filename: str, extracted_text: str, document_id: int):
-    """Analyze document using Claude API"""
-    llm_service = LLMService()
-    
-    try:
-        # Get analysis from Claude
-        analysis_prompt = get_analysis_prompt(filename)
-        response = llm_service.analyze_text(extracted_text, analysis_prompt)
-        analysis_data = json.loads(response)
 
+@celery_app.task(bind=True, name='tasks.process_document')
+@handle_task_failure
+def process_document(self, filename: str, minio_path: str, document_id: int):
+    """Process document through LLM analysis pipeline"""
+    doc = Document.query.get(document_id)
+    doc.status = TASK_STATUSES['PROCESSING']
+    db.session.commit()
+
+    try:
+        print(f"Starting analysis for document: {filename}")
+        
+        # Initialize LLM service and analyze
+        llm_service = LLMService()
+        response = llm_service.analyze_document(filename)
+        
+        print(f"Received LLM response, parsing results...")
+        
+        # Parse results
+        parser = LLMResponseParser()
+        
         # Store LLM Analysis
+        llm_analysis_data = parser.parse_llm_analysis(response)
         llm_analysis = LLMAnalysis(
             document_id=document_id,
-            summary_description=analysis_data['document_analysis']['summary'],
-            content_analysis=json.dumps(analysis_data['document_analysis']),
-            confidence_score=analysis_data['document_analysis']['confidence_score'],
-            analysis_date=datetime.utcnow(),
-            model_version='claude-3'
+            **llm_analysis_data
         )
         db.session.add(llm_analysis)
+        db.session.flush()
+        print(f"Stored LLM analysis")
 
         # Store Design Elements
-        design = analysis_data['design_elements']
+        design_data = parser.parse_design_elements(response)
         design_element = DesignElement(
-            documents_id=document_id,
-            color_scheme=json.dumps(design['color_scheme']),
-            theme=design['theme'],
-            mail_piece_type=design['mail_piece_type'],
-            geographic_location=design['geographic_location'],
-            target_audience=design['target_audience'],
-            campaign_name=design['campaign_name'],
-            confidence=int(design['confidence'] * 100),
-            created_date=datetime.utcnow()
+            document_id=document_id,
+            **design_data
         )
         db.session.add(design_element)
+        print(f"Stored design elements")
 
         # Store Classification
+        classification_data = parser.parse_classification(response)
         classification = Classification(
             document_id=document_id,
-            category=analysis_data['classification']['category'],
-            confidence=int(analysis_data['classification']['confidence'] * 100),
-            classification_date=datetime.utcnow()
+            **classification_data
         )
         db.session.add(classification)
+        print(f"Stored classification")
+
+        # Store Extracted Text
+        text_data = response.get('extracted_text', {})
+        text_entry = ExtractedText(
+            document_id=document_id,
+            text_content=text_data.get('main_message', '') + '\n\n' + text_data.get('supporting_text', ''),
+            confidence=float(text_data.get('confidence', 0.9)),
+            extraction_date=datetime.utcnow()
+        )
+        db.session.add(text_entry)
+        print(f"Stored extracted text")
 
         # Store Keywords
-        for keyword_data in analysis_data['keywords']:
+        keywords_data = parser.parse_keywords(response)
+        for keyword_data in keywords_data:
             keyword = LLMKeyword(
                 llm_analysis_id=llm_analysis.id,
-                keyword=keyword_data['text'],
-                category=keyword_data['category'],
-                relevance_score=int(keyword_data['confidence'] * 100)
+                **keyword_data
             )
             db.session.add(keyword)
+        print(f"Stored {len(keywords_data)} keywords")
 
+        # Update status and commit
+        doc.status = TASK_STATUSES['COMPLETED']
         db.session.commit()
+        print(f"Analysis completed successfully")
+
+        return True
 
     except Exception as e:
-        logger.error(f"Document analysis failed: {str(e)}")
-        db.session.rollback()
+        logger.error(f"Document processing failed: {str(e)}", exc_info=True)
+        doc.status = TASK_STATUSES['FAILED']
+        db.session.commit()
         raise
