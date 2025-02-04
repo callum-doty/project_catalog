@@ -2,17 +2,20 @@
 
 from flask import Flask
 from app.extensions import db, migrate
-from config.settings import settings  # Import the settings instance
+from config.settings import settings
 import os
 
 def create_app():
+    template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
+    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+    
     app = Flask(__name__,
-                template_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates'),
-                static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static'))
+                template_folder=template_dir,
+                static_folder=static_dir)
     
     # Load config
     app.config.from_object(settings)
-    settings.init_app(app)  # Now calls init_app on the instance
+    settings.init_app(app)
     
     # Ensure critical configs are set
     if not app.config.get('SQLALCHEMY_DATABASE_URI'):

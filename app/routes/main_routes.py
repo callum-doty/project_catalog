@@ -63,36 +63,46 @@ def upload_file():
 @main_routes.route('/search')
 def search_documents():
     query = request.args.get('q', '')
-    if not query:
-        documents = Document.query.order_by(Document.upload_date.desc()).all()
-    else:
-        documents = Document.query\
-            .join(LLMAnalysis)\
-            .join(LLMKeyword)\
-            .filter(
-                or_(
-                    Document.filename.ilike(f'%{query}%'),
-                    LLMAnalysis.summary_description.ilike(f'%{query}%'),
-                    LLMKeyword.keyword.ilike(f'%{query}%')
-                )
-            )\
-            .distinct()\
-            .all()
+    current_app.logger.info(f"Search query: {query}")  # Add logging
     
-    results = []
-    for doc in documents:
-        analysis = LLMAnalysis.query.filter_by(document_id=doc.id).first()
-        keywords = LLMKeyword.query.join(LLMAnalysis).filter(LLMAnalysis.document_id == doc.id).all()
+    try:
+        if not query:
+            documents = Document.query.order_by(Document.upload_date.desc()).all()
+        else:
+            documents = Document.query\
+                .outerjoin(LLMAnalysis)\
+                .outerjoin(LLMKeyword)\
+                .filter(
+                    or_(
+                        Document.filename.ilike(f'%{query}%'),
+                        LLMAnalysis.summary_description.ilike(f'%{query}%'),
+                        LLMKeyword.keyword.ilike(f'%{query}%')
+                    )
+                )\
+                .distinct()\
+                .all()
         
-        results.append({
-            'id': doc.id,
-            'filename': doc.filename,
-            'upload_date': doc.upload_date.strftime('%Y-%m-%d %H:%M:%S'),
-            'summary': analysis.summary_description if analysis else '',
-            'keywords': [{'text': k.keyword, 'category': k.category} for k in keywords] if keywords else []
-        })
-    
-    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-        return jsonify(results)
-    
-    return render_template('search.html', documents=results, query=query)
+        current_app.logger.info(f"Found {len(documents)} documents")  # Add logging
+        
+        results = []
+        for doc in documents:
+            analysis = LLMAnalysis.query.filter_by(document_id=doc.id).first()
+            keywords = LLMKeyword.query.join(LLMAnalysis).filter(LLMAnalysis.document_id == doc.id).all()
+            
+            results.append({
+                'id': doc.id,
+                'filename': doc.filename,
+                'upload_date': doc.upload_date.strftime('%Y-%m-%d %H:%M:%S'),
+                'summary': analysis.summary_description if analysis else '',
+                'keywords': [{'text': k.keyword, 'category': k.category} for k in keywords] if keywords else []
+            })
+        
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify(results)
+        
+        return render_template('search.html', documents=results, query=query)
+        
+    except Exception as e:
+        current_app.logger.error(f"Search error: {str(e)}")  # Add logging
+        flash(f'Error performing search: {str(e)}', 'error')
+        return render_template('search.html', documents=[], query=query)
