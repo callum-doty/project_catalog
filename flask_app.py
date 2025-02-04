@@ -1,8 +1,8 @@
-# app/__init__.py
+# app/flask_app.py
 
 from flask import Flask
 from app.extensions import db, migrate
-from config.settings import settings  # Import the settings instance
+from dotenv import load_dotenv
 import os
 
 def create_app():
@@ -10,16 +10,11 @@ def create_app():
                 template_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates'),
                 static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static'))
     
-    # Load config
-    app.config.from_object(settings)
-    settings.init_app(app)  # Now calls init_app on the instance
+    load_dotenv()
     
-    # Ensure critical configs are set
-    if not app.config.get('SQLALCHEMY_DATABASE_URI'):
-        raise RuntimeError(
-            'SQLALCHEMY_DATABASE_URI is not set. '
-            'Please check your environment variables and configuration.'
-        )
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-please-change')
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
     # Initialize extensions
     db.init_app(app)
@@ -31,3 +26,6 @@ def create_app():
         app.register_blueprint(main_routes)
     
     return app
+
+# Create the Flask application instance
+flask_app = create_app()

@@ -1,16 +1,14 @@
-from flask import Blueprint, render_template, request, flash, redirect, url_for
+# app/routes/main_routes.py
+
+from flask import Blueprint, render_template, request, flash, redirect, url_for, current_app
 from werkzeug.utils import secure_filename
 import os
 from datetime import datetime
 from app.services.storage_service import MinIOStorage
 from app.extensions import db 
 from app.models.models import Document
-from tasks.document_tasks import process_document
-from flask import jsonify
-from sqlalchemy import text
 
-
-main_routes = Blueprint('main_routes', __name__)
+main_routes = Blueprint('main_routes', __name__, template_folder='../templates')
 storage = MinIOStorage()
 
 @main_routes.route('/')
@@ -19,7 +17,6 @@ def index():
         documents = Document.query.order_by(Document.upload_date.desc()).limit(10).all()
         return render_template('index.html', documents=documents)
     except Exception as e:
-        # Log the error but return empty list
         current_app.logger.error(f"Error fetching documents: {str(e)}")
         return render_template('index.html', documents=[])
 
@@ -50,6 +47,9 @@ def upload_file():
         db.session.commit()
 
         minio_path = storage.upload_file(temp_path, filename)
+        
+        # Import task here to avoid circular import
+        from tasks.document_tasks import process_document
         process_document.delay(filename, minio_path, document.id)
         
         os.remove(temp_path)
@@ -59,18 +59,3 @@ def upload_file():
     except Exception as e:
         flash(f'Error uploading file: {str(e)}', 'error')
         return redirect(url_for('main_routes.index'))
-
-
-@main_routes.route('/health')
-def health_check():
-    try:
-        db.session.execute(text('SELECT 1'))
-        db.session.commit()
-        return jsonify({
-            'status': 'healthy',
-            'database': 'connected',
-            'tables': ['documents', 'batch_jobs', 'llm_analysis', 'extracted_text', 
-                      'design_elements', 'classifications', 'llm_keywords', 'clients']
-        })
-    except Exception as e:
-        return jsonify({'status': 'unhealthy', 'database': str(e)}), 500
