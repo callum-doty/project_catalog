@@ -24,10 +24,12 @@ services:
 
   db:
     image: postgres:14
+    ports:
+      - "5432:5432"
     environment:
-      POSTGRES_DB: catalog_db
       POSTGRES_USER: custom_user
       POSTGRES_PASSWORD: strong_password
+      POSTGRES_DB: catalog_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

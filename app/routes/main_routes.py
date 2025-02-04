@@ -1,14 +1,16 @@
 # app/routes/main_routes.py
 
-from flask import Blueprint, render_template, request, flash, redirect, url_for, current_app
+from flask import Blueprint, render_template, request, flash, redirect, url_for, current_app, jsonify
 from werkzeug.utils import secure_filename
 import os
 from datetime import datetime
 from app.services.storage_service import MinIOStorage
 from app.extensions import db 
-from app.models.models import Document
+from app.models.models import Document, LLMAnalysis, LLMKeyword
+from sqlalchemy import or_
+from tasks.document_tasks import process_document
 
-main_routes = Blueprint('main_routes', __name__, template_folder='../templates')
+main_routes = Blueprint('main_routes', __name__)
 storage = MinIOStorage()
 
 @main_routes.route('/')
@@ -47,9 +49,6 @@ def upload_file():
         db.session.commit()
 
         minio_path = storage.upload_file(temp_path, filename)
-        
-        # Import task here to avoid circular import
-        from tasks.document_tasks import process_document
         process_document.delay(filename, minio_path, document.id)
         
         os.remove(temp_path)
@@ -57,5 +56,43 @@ def upload_file():
         return redirect(url_for('main_routes.index'))
 
     except Exception as e:
+        current_app.logger.error(f"Upload error: {str(e)}")
         flash(f'Error uploading file: {str(e)}', 'error')
         return redirect(url_for('main_routes.index'))
+
+@main_routes.route('/search')
+def search_documents():
+    query = request.args.get('q', '')
+    if not query:
+        documents = Document.query.order_by(Document.upload_date.desc()).all()
+    else:
+        documents = Document.query\
+            .join(LLMAnalysis)\
+            .join(LLMKeyword)\
+            .filter(
+                or_(
+                    Document.filename.ilike(f'%{query}%'),
+                    LLMAnalysis.summary_description.ilike(f'%{query}%'),
+                    LLMKeyword.keyword.ilike(f'%{query}%')
+                )
+            )\
+            .distinct()\
+            .all()
+    
+    results = []
+    for doc in documents:
+        analysis = LLMAnalysis.query.filter_by(document_id=doc.id).first()
+        keywords = LLMKeyword.query.join(LLMAnalysis).filter(LLMAnalysis.document_id == doc.id).all()
+        
+        results.append({
+            'id': doc.id,
+            'filename': doc.filename,
+            'upload_date': doc.upload_date.strftime('%Y-%m-%d %H:%M:%S'),
+            'summary': analysis.summary_description if analysis else '',
+            'keywords': [{'text': k.keyword, 'category': k.category} for k in keywords] if keywords else []
+        })
+    
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify(results)
+    
+    return render_template('search.html', documents=results, query=query)
