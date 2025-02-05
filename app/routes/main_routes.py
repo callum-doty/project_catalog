@@ -9,9 +9,11 @@ from app.extensions import db
 from app.models.models import Document, LLMAnalysis, LLMKeyword
 from sqlalchemy import or_
 from tasks.document_tasks import process_document
+from app.services.preview_service import PreviewService
 
 main_routes = Blueprint('main_routes', __name__)
 storage = MinIOStorage()
+preview_service = PreviewService()
 
 @main_routes.route('/')
 def index():
@@ -63,7 +65,7 @@ def upload_file():
 @main_routes.route('/search')
 def search_documents():
     query = request.args.get('q', '')
-    current_app.logger.info(f"Search query: {query}")  # Add logging
+    current_app.logger.info(f"Search query: {query}")
     
     try:
         if not query:
@@ -82,20 +84,33 @@ def search_documents():
                 .distinct()\
                 .all()
         
-        current_app.logger.info(f"Found {len(documents)} documents")  # Add logging
-        
+        current_app.logger.info(f"Found {len(documents)} documents")
         results = []
+        
         for doc in documents:
+            current_app.logger.info(f"Processing document: {doc.filename}")
+            
             analysis = LLMAnalysis.query.filter_by(document_id=doc.id).first()
             keywords = LLMKeyword.query.join(LLMAnalysis).filter(LLMAnalysis.document_id == doc.id).all()
+            
+            # Generate preview
+            preview = None
+            try:
+                preview = preview_service.get_preview(doc.filename)
+                current_app.logger.info(f"Preview generated for {doc.filename}: {'Success' if preview else 'None'}")
+            except Exception as e:
+                current_app.logger.error(f"Preview generation failed for {doc.filename}: {str(e)}")
             
             results.append({
                 'id': doc.id,
                 'filename': doc.filename,
                 'upload_date': doc.upload_date.strftime('%Y-%m-%d %H:%M:%S'),
                 'summary': analysis.summary_description if analysis else '',
-                'keywords': [{'text': k.keyword, 'category': k.category} for k in keywords] if keywords else []
+                'keywords': [{'text': k.keyword, 'category': k.category} for k in keywords] if keywords else [],
+                'preview': preview
             })
+            
+            current_app.logger.info(f"Document data prepared: {doc.filename}")
         
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify(results)
@@ -103,6 +118,6 @@ def search_documents():
         return render_template('search.html', documents=results, query=query)
         
     except Exception as e:
-        current_app.logger.error(f"Search error: {str(e)}")  # Add logging
+        current_app.logger.error(f"Search error: {str(e)}", exc_info=True)
         flash(f'Error performing search: {str(e)}', 'error')
         return render_template('search.html', documents=[], query=query)

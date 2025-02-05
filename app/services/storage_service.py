@@ -1,7 +1,8 @@
+# app/services/storage_service.py
 from minio import Minio
 import os
 from urllib3 import PoolManager
-
+import io
 
 class MinIOStorage:
     def __init__(self):
@@ -34,8 +35,29 @@ class MinIOStorage:
         except Exception as e:
             raise Exception(f"MinIO upload failed: {str(e)}")
 
+    def get_file(self, filename):
+        """Get file data from MinIO"""
+        try:
+            # Create a response object
+            data = io.BytesIO()
+            
+            # Get the object and write it to the BytesIO buffer
+            response = self.client.get_object(self.bucket, filename)
+            
+            # Read all the data
+            for d in response.stream(32*1024):
+                data.write(d)
+            
+            # Reset the buffer position to the beginning
+            data.seek(0)
+            
+            # Return the bytes
+            return data.getvalue()
+        except Exception as e:
+            raise Exception(f"MinIO download failed: {str(e)}")
+
     def download_file(self, filename, download_path):
-        """Download file from MinIO"""
+        """Download file from MinIO to a local path"""
         try:
             self.client.fget_object(
                 bucket_name=self.bucket,
