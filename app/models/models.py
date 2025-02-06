@@ -81,3 +81,14 @@ class ExtractedText(db.Model):
     text_content = db.Column(db.Text)
     confidence = db.Column(db.BigInteger)
     extraction_date = db.Column(db.DateTime(timezone=True))
+
+
+class DropboxSync(db.Model):
+    __tablename__ = 'dropbox_syncs'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    document_id = db.Column(db.Integer, db.ForeignKey('documents.id'))
+    dropbox_file_id = db.Column(db.String(255), unique=True)
+    dropbox_path = db.Column(db.String(512))
+    sync_date = db.Column(db.DateTime(timezone=True))
+    status = db.Column(db.String(50), default='SYNCED')

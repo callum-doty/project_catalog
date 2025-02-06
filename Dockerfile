@@ -36,14 +36,14 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create non-root user
+
 RUN useradd -m appuser && chown -R appuser /app
 USER appuser
 
-# Copy application files
+
 COPY --chown=appuser . .
 
-# Create necessary directories
+
 RUN mkdir -p uploads logs
 
 EXPOSE 5000

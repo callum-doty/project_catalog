@@ -73,7 +73,7 @@ class PreviewService:
                 last_page=1,
                 dpi=72,  # Lower DPI for preview
                 fmt='jpeg',
-                size=(300, None)  # Set max width, height auto
+                size=(300, None) 
             )
             
             if not images:

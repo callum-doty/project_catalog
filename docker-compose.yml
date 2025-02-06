@@ -69,6 +69,22 @@ services:
       - redis
       - db
       - minio
+  
+  celery-beat:
+    build: .
+    command: celery -A tasks.celery_app beat --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://custom_user:strong_password@db:5432/catalog_db
+      - SQLALCHEMY_DATABASE_URI=postgresql://custom_user:strong_password@db:5432/catalog_db
+      - MINIO_ACCESS_KEY=minioaccess
+      - MINIO_SECRET_KEY=miniosecret
+      - MINIO_BUCKET=documents
+      - DROPBOX_ACCESS_TOKEN=${DROPBOX_ACCESS_TOKEN}
+      - DROPBOX_FOLDER_PATH=${DROPBOX_FOLDER_PATH}
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - celery
+      - redis
 
 volumes:
   postgres_data:

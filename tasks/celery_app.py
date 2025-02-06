@@ -2,25 +2,23 @@
 
 from celery import Celery
 from celery.utils.log import get_task_logger
-from config.settings import settings
-
-logger = get_task_logger(__name__)
+from celery.schedules import crontab
+import functools
 
 # Initialize Celery
-celery_app = Celery('tasks')
+celery_app = Celery('tasks', broker='redis://redis:6379/0')
 
 # Configure Celery
 celery_app.conf.update(
-    broker_url=settings.broker_url,
-    result_backend=settings.result_backend,
-    task_serializer=settings.task_serializer,
-    result_serializer=settings.result_serializer,
-    accept_content=settings.accept_content,
-    timezone=settings.timezone,
-    enable_utc=settings.enable_utc,
-    task_routes=settings.task_routes,
-    imports=['tasks.document_tasks']
+    result_backend='redis://redis:6379/0',
+    task_serializer='json',
+    accept_content=['json'],
+    result_serializer='json',
+    timezone='UTC',
+    enable_utc=True,
 )
+
+logger = get_task_logger(__name__)
 
 # Task status tracking
 TASK_STATUSES = {
@@ -30,13 +28,21 @@ TASK_STATUSES = {
     'FAILED': 'FAILED'
 }
 
+celery_app.conf.task_routes = {
+    'tasks.process_document': {'queue': 'document_processing'},
+    'tasks.analyze_document': {'queue': 'analysis'},
+    'tasks.sync_dropbox': {'queue': 'document_processing'},
+}
+
+# Error handling decorator
 def handle_task_failure(task_func):
+    @functools.wraps(task_func)
     def wrapper(*args, **kwargs):
         try:
             return task_func(*args, **kwargs)
         except Exception as e:
             logger.error(f"Task failed: {str(e)}", exc_info=True)
-            # Update document status to failed if possible
+            # Update document status to failed if document_id is provided
             from app.models import Document, db
             document_id = kwargs.get('document_id')
             if document_id:
@@ -46,3 +52,11 @@ def handle_task_failure(task_func):
                     db.session.commit()
             raise
     return wrapper
+
+# Beat schedule for Dropbox sync
+celery_app.conf.beat_schedule = {
+    'sync-dropbox-every-5-minutes': {
+        'task': 'tasks.sync_dropbox',
+        'schedule': crontab(minute='*/5'),  # Run every 5 minutes
+    },
+}
