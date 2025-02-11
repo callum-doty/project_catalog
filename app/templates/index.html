@@ -9,6 +9,7 @@
       enctype="multipart/form-data"
       class="space-y-4"
     >
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <div>
         <label class="block text-gray-700 text-sm font-bold mb-2" for="file">
           Select File (PDF, PNG, or Image)

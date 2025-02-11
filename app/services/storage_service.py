@@ -5,23 +5,35 @@ from urllib3 import PoolManager
 import io
 
 class MinIOStorage:
-    def __init__(self):
-        http_client = PoolManager(timeout=5.0, retries=3)
-        print("Initializing Minio client with:")
-        print(f"Endpoint: minio:9000")
-        print(f"Access Key: {os.getenv('MINIO_ACCESS_KEY', 'minioaccess')}")
-        self.client = Minio(
-            endpoint="minio:9000",
-            access_key=os.getenv("MINIO_ACCESS_KEY", "minioaccess"),
-            secret_key=os.getenv("MINIO_SECRET_KEY", "miniosecret"),
-            secure=False,
-            http_client=http_client
-        )
-
-        self.bucket = os.getenv("MINIO_BUCKET", "documents")
-        
-        if not self.client.bucket_exists(self.bucket):
-            self.client.make_bucket(self.bucket)
+    _instance = None
+    _client = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(MinIOStorage, cls).__new__(cls)
+            cls._instance._init_client()
+        return cls._instance
+    
+    def _init_client(self):
+        if self._client is None:
+            http_client = PoolManager(timeout=5.0, retries=3)
+            print("Initializing Minio client with:")
+            print(f"Endpoint: minio:9000")
+            print(f"Access Key: {os.getenv('MINIO_ACCESS_KEY', 'minioaccess')}")
+            self._client = Minio(
+                endpoint="minio:9000",
+                access_key=os.getenv("MINIO_ACCESS_KEY", "minioaccess"),
+                secret_key=os.getenv("MINIO_SECRET_KEY", "miniosecret"),
+                secure=False,
+                http_client=http_client
+            )
+            self.bucket = os.getenv("MINIO_BUCKET", "documents")
+            if not self._client.bucket_exists(self.bucket):
+                self._client.make_bucket(self.bucket)
+    
+    @property
+    def client(self):
+        return self._client
 
     def upload_file(self, filepath, filename):
         """Upload file to MinIO"""
@@ -38,20 +50,11 @@ class MinIOStorage:
     def get_file(self, filename):
         """Get file data from MinIO"""
         try:
-            # Create a response object
             data = io.BytesIO()
-            
-            # Get the object and write it to the BytesIO buffer
             response = self.client.get_object(self.bucket, filename)
-            
-            # Read all the data
             for d in response.stream(32*1024):
                 data.write(d)
-            
-            # Reset the buffer position to the beginning
             data.seek(0)
-            
-            # Return the bytes
             return data.getvalue()
         except Exception as e:
             raise Exception(f"MinIO download failed: {str(e)}")

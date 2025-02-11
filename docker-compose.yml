@@ -55,35 +55,44 @@ services:
     volumes:
       - minio_data:/data
 
-  celery:
+  celery-worker:
     build: .
-    command: celery -A tasks.celery_app worker --loglevel=info
+    command: celery -A tasks worker -Q document_processing,analysis --loglevel=info
+    volumes:
+      - .:/app
     environment:
-      - DATABASE_URL=postgresql://custom_user:strong_password@db:5432/catalog_db
-      - MINIO_ACCESS_KEY=minioaccess
-      - MINIO_SECRET_KEY=miniosecret
-      - MINIO_BUCKET=documents
-      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
-    depends_on:
-      - web
-      - redis
-      - db
-      - minio
-  
-  celery-beat:
-    build: .
-    command: celery -A tasks.celery_app beat --loglevel=info
-    environment:
-      - DATABASE_URL=postgresql://custom_user:strong_password@db:5432/catalog_db
-      - SQLALCHEMY_DATABASE_URI=postgresql://custom_user:strong_password@db:5432/catalog_db
-      - MINIO_ACCESS_KEY=minioaccess
-      - MINIO_SECRET_KEY=miniosecret
-      - MINIO_BUCKET=documents
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - DROPBOX_ACCESS_TOKEN=${DROPBOX_ACCESS_TOKEN}
       - DROPBOX_FOLDER_PATH=${DROPBOX_FOLDER_PATH}
-      - PYTHONUNBUFFERED=1
     depends_on:
-      - celery
+      - redis
+
+  celery-beat:
+    build: .
+    command: celery -A tasks beat --loglevel=info
+    volumes:
+      - .:/app
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DROPBOX_ACCESS_TOKEN=${DROPBOX_ACCESS_TOKEN}
+      - DROPBOX_FOLDER_PATH=${DROPBOX_FOLDER_PATH}
+    depends_on:
+      - redis
+      - celery-worker
+
+  celery:
+    build: .
+    command: celery -A tasks.celery_app worker -Q celery --loglevel=info
+    volumes:
+      - .:/app
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DROPBOX_ACCESS_TOKEN=${DROPBOX_ACCESS_TOKEN}
+      - DROPBOX_FOLDER_PATH=${DROPBOX_FOLDER_PATH}
+    depends_on:
       - redis
 
 volumes:

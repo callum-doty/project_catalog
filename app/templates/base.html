@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="csrf-token" content="{{ csrf_token() }}" />
     <title>Document Catalog</title>
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
@@ -21,6 +22,26 @@
             </a>
           </div>
           <div class="flex items-center space-x-4">
+            <!-- Sync Status and Button -->
+            <div class="flex items-center space-x-4">
+              <div
+                id="syncStatus"
+                class="text-sm bg-gray-100 rounded-lg px-3 py-2 flex items-center space-x-2"
+              >
+                <span
+                  class="sync-indicator w-2 h-2 rounded-full bg-gray-400"
+                ></span>
+                <span class="sync-text">Checking sync status...</span>
+              </div>
+              <button
+                onclick="manualSync(event)"
+                id="triggerSyncBtn"
+                class="text-sm bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-3 py-2"
+                type="button"
+              >
+                Sync Now
+              </button>
+            </div>
             <a
               href="{{ url_for('main_routes.index') }}"
               class="py-4 px-2 text-gray-500 hover:text-blue-500 transition duration-300"
@@ -48,5 +69,44 @@
       </div>
       {% endfor %} {% endif %} {% endwith %} {% block content %}{% endblock %}
     </div>
+
+    <script>
+      // Add this to your existing script section
+      async function manualSync(event) {
+        event.preventDefault();
+        console.log("Manual sync triggered");
+
+        const button = event.target;
+        button.disabled = true;
+        button.textContent = "Syncing...";
+
+        try {
+          const response = await fetch("/api/trigger-sync", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRFToken": document.querySelector('meta[name="csrf-token"]')
+                .content,
+            },
+          });
+
+          console.log("Response status:", response.status);
+          const data = await response.json();
+          console.log("Response data:", data);
+
+          if (response.ok) {
+            alert("Sync started successfully!");
+          } else {
+            alert("Error: " + data.message);
+          }
+        } catch (error) {
+          console.error("Sync error:", error);
+          alert("Error triggering sync");
+        } finally {
+          button.disabled = false;
+          button.textContent = "Sync Now";
+        }
+      }
+    </script>
   </body>
 </html>

@@ -10,7 +10,7 @@ from dropbox.files import FileMetadata
 from app import create_app
 from app.extensions import db
 from app.models.models import Document, LLMAnalysis, DesignElement, Classification, LLMKeyword, DropboxSync
-from tasks.dropbox_task import sync_dropbox
+from tasks.dropbox_tasks import sync_dropbox
 from tasks.document_tasks import process_document
 from app.services.dropbox_service import DropboxService
 

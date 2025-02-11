@@ -10,6 +10,10 @@ from app.models.models import Document, LLMAnalysis, LLMKeyword
 from sqlalchemy import or_
 from tasks.document_tasks import process_document
 from app.services.preview_service import PreviewService
+from app.services.dropbox_service import DropboxService
+from flask_wtf.csrf import generate_csrf
+from tasks.dropbox_tasks import sync_dropbox
+from app import csrf
 
 main_routes = Blueprint('main_routes', __name__)
 storage = MinIOStorage()
@@ -121,3 +125,62 @@ def search_documents():
         current_app.logger.error(f"Search error: {str(e)}", exc_info=True)
         flash(f'Error performing search: {str(e)}', 'error')
         return render_template('search.html', documents=[], query=query)
+
+
+@main_routes.route('/api/test-dropbox')
+def test_dropbox_connection():
+    """Test Dropbox connection and return diagnostic information"""
+    try:
+        dropbox_service = DropboxService()
+        status = dropbox_service.test_connection()
+        return jsonify(status)
+    except Exception as e:
+        current_app.logger.error(f"Dropbox test failed: {str(e)}")
+        return jsonify({
+            'connected': False,
+            'error': str(e)
+        }), 500
+
+@main_routes.route('/api/sync-status')
+@csrf.exempt
+def get_sync_status():
+    """Get Dropbox sync status"""
+    try:
+        dropbox_service = DropboxService()
+        status = dropbox_service.get_sync_status()
+        return jsonify(status)
+    except Exception as e:
+        current_app.logger.error(f"Error getting sync status: {str(e)}")
+        return jsonify({
+            'error': 'Failed to get sync status',
+            'last_sync_time': None,
+            'last_24h_files': 0,
+            'last_status': 'ERROR',
+            'dropbox_connected': False
+        })
+
+@main_routes.route('/api/trigger-sync', methods=['POST'])
+def trigger_sync():
+    """Manually trigger a Dropbox sync"""
+    try:
+        current_app.logger.info("Manually triggering Dropbox sync")
+        result = sync_dropbox.delay()
+        current_app.logger.info(f"Sync task triggered with ID: {result.id}")
+        return jsonify({
+            'status': 'success',
+            'message': 'Sync task triggered',
+            'task_id': result.id
+        })
+    except Exception as e:
+        current_app.logger.error(f"Error triggering sync: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@main_routes.after_request
+def add_csrf_token(response):
+    """Add CSRF token to response for AJAX requests"""
+    if 'text/html' in response.headers['Content-Type']:
+        response.set_cookie('csrf_token', generate_csrf())
+    return response

@@ -1,18 +1,16 @@
+# tasks/document_tasks.py
+
 import os
 from datetime import datetime
 from celery import Task
-from .celery_app import celery_app, handle_task_failure, logger, TASK_STATUSES
-from app.services.analysis_prompt import get_analysis_prompt
-from app.services.storage_service import MinIOStorage
-from app.services.llm_service import LLMService
+from .celery_app import celery_app
+from .utils import handle_task_failure, logger, TASK_STATUSES
 from app.models.models import Document, BatchJob, LLMAnalysis, ExtractedText, DesignElement, Classification, LLMKeyword
 from app.extensions import db
-import json
+from app.services.llm_parser import LLMResponseParser
 from PIL import Image
 import pytesseract
 from pdf2image import convert_from_path
-from app.services.llm_parser import LLMResponseParser
-from flask import current_app
 
 class DocumentProcessor(Task):
     abstract = True
@@ -22,12 +20,14 @@ class DocumentProcessor(Task):
     @property
     def storage(self):
         if self._storage is None:
+            from app.services.storage_service import MinIOStorage
             self._storage = MinIOStorage()
         return self._storage
     
     @property
     def llm_service(self):
         if self._llm_service is None:
+            from app.services.llm_service import LLMService
             self._llm_service = LLMService()
         return self._llm_service
 
@@ -40,7 +40,7 @@ class DocumentProcessor(Task):
                 db.session.commit()
         logger.error(f"Task {task_id} failed: {str(exc)}", exc_info=einfo)
 
-
+    @staticmethod
     def extract_text_from_pdf(filepath: str) -> str:
         """Extract text from PDF using pdf2image and pytesseract"""
         try:
@@ -54,6 +54,7 @@ class DocumentProcessor(Task):
             logger.error(f"PDF text extraction failed: {str(e)}")
             raise
 
+    @staticmethod
     def extract_text_from_image(filepath: str) -> str:
         """Extract text from image using pytesseract"""
         try:
@@ -63,12 +64,10 @@ class DocumentProcessor(Task):
             logger.error(f"Image text extraction failed: {str(e)}")
             raise
 
-
-
 @celery_app.task(bind=True, base=DocumentProcessor)
+@handle_task_failure
 def process_document(self, filename: str, minio_path: str, document_id: int):
     """Process document through the pipeline"""
-    # Import Flask app here to avoid circular import
     from app import create_app
     app = create_app()
     
@@ -78,13 +77,11 @@ def process_document(self, filename: str, minio_path: str, document_id: int):
         db.session.commit()
 
         try:
-            print(f"Starting analysis for document: {filename}")
+            logger.info(f"Starting analysis for document: {filename}")
             
             # Initialize LLM service and analyze
-            llm_service = LLMService()
-            response = llm_service.analyze_document(filename)
-            
-            print(f"Received LLM response, parsing results...")
+            response = self.llm_service.analyze_document(filename)
+            logger.info(f"Received LLM response, parsing results...")
             
             # Parse results
             parser = LLMResponseParser()
@@ -97,7 +94,7 @@ def process_document(self, filename: str, minio_path: str, document_id: int):
             )
             db.session.add(llm_analysis)
             db.session.flush()
-            print(f"Stored LLM analysis")
+            logger.info(f"Stored LLM analysis")
 
             # Store Design Elements
             design_data = parser.parse_design_elements(response)
@@ -106,7 +103,7 @@ def process_document(self, filename: str, minio_path: str, document_id: int):
                 **design_data
             )
             db.session.add(design_element)
-            print(f"Stored design elements")
+            logger.info(f"Stored design elements")
 
             # Store Classification
             classification_data = parser.parse_classification(response)
@@ -115,7 +112,7 @@ def process_document(self, filename: str, minio_path: str, document_id: int):
                 **classification_data
             )
             db.session.add(classification)
-            print(f"Stored classification")
+            logger.info(f"Stored classification")
 
             # Store Extracted Text
             text_data = response.get('extracted_text', {})
@@ -126,7 +123,7 @@ def process_document(self, filename: str, minio_path: str, document_id: int):
                 extraction_date=datetime.utcnow()
             )
             db.session.add(text_entry)
-            print(f"Stored extracted text")
+            logger.info(f"Stored extracted text")
 
             # Store Keywords
             keywords_data = parser.parse_keywords(response)
@@ -136,12 +133,12 @@ def process_document(self, filename: str, minio_path: str, document_id: int):
                     **keyword_data
                 )
                 db.session.add(keyword)
-            print(f"Stored {len(keywords_data)} keywords")
+            logger.info(f"Stored {len(keywords_data)} keywords")
 
             # Update status and commit
             doc.status = TASK_STATUSES['COMPLETED']
             db.session.commit()
-            print(f"Analysis completed successfully")
+            logger.info(f"Analysis completed successfully")
 
             return True
 
