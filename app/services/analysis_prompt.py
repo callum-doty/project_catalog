@@ -1,53 +1,62 @@
+# app/services/analysis_prompt.py
+
 def get_analysis_prompt(filename: str) -> str:
     """
-    Generate a structured analysis prompt that maps directly to database schema
+    Generate a structured analysis prompt that maps directly to database schema with clear type requirements
     """
     return f"""Please analyze the document '{filename}' and provide a structured analysis in the exact format specified below.
 Required Output Format:
 {{
     "document_analysis": {{
-        "summary": "Brief 1-2 sentence overview",
+        "summary": "Brief 1-2 sentence overview as a single string",
         "confidence_score": <float between 0.0 and 1.0>,
-        "file_type": "identify if mailer/digital/etc",
-        "campaign_type": "primary/general/special/runoff"
+        "file_type": "identify if mailer/digital/etc - as a single string",
+        "campaign_type": "primary/general/special/runoff - as a single string"
     }},
     
     "design_elements": {{
         "color_scheme": ["primary color", "secondary color", "accent color"],
-        "theme": "main visual theme",
-        "mail_piece_type": "type of mailer/asset",
-        "geographic_location": "target geography",
-        "target_audience": "specific demographic focus",
-        "campaign_name": "campaign identifier",
+        "theme": "main visual theme as a single string",
+        "mail_piece_type": "type of mailer/asset as a single string",
+        "geographic_location": "target geography as City, State or State only",
+        "target_audience": "specific demographic focus as a single string",
+        "campaign_name": "campaign identifier as a single string",
         "confidence": <float between 0.0 and 1.0>
     }},
     
     "classification": {{
-        "category": "main category",
-        "confidence": <float between 0.0 and 1.0>,
-        "subcategories": ["subcategory1", "subcategory2"],
-        "tags": ["tag1", "tag2", "tag3"]
+        "category": "main category as a single string",
+        "confidence": <float between 0.0 and 1.0>
     }},
     
     "extracted_text": {{
-        "main_message": "primary text/headline",
-        "supporting_text": "secondary messages",
-        "call_to_action": "CTA text if present",
+        "main_message": "primary text/headline as a single string - DO NOT return as a list",
+        "supporting_text": "secondary messages as a single string - DO NOT return as a list",
+        "call_to_action": "CTA text if present as a single string",
         "confidence": <float between 0.0 and 1.0>
     }},
     
     "keywords": [
         {{
-            "text": "keyword1",
-            "category": "theme/visual/messaging/demographic",
+            "text": "keyword1 as a single string",
+            "category": "theme/visual/messaging/demographic as a single string",
             "confidence": <float between 0.0 and 1.0>
         }},
-        // limit to 5 most relevant keywords
+        {{
+            "text": "keyword2 as a single string",
+            "category": "theme/visual/messaging/demographic as a single string",
+            "confidence": <float between 0.0 and 1.0>
+        }},
+        ... maximum 5 keywords total
     ]
 }}
-Please ensure:
-1. All confidence scores are between 0.0 and 1.0
-2. Exactly 5 keywords maximum, prioritizing most relevant/distinctive
-3. Color schemes use standardized color names
-4. Categories align with the existing classification system
-5. Geographic locations use standardized format (City, State or State only)"""
+
+Important Requirements:
+1. All text fields MUST be single strings, not lists or arrays
+2. All confidence scores MUST be floats between 0.0 and 1.0
+3. Exactly 5 keywords maximum, prioritizing most relevant/distinctive
+4. Color schemes MUST use standardized color names
+5. Geographic locations MUST use standardized format (City, State or State only)
+6. All fields are required - provide reasonable default values if information is unclear
+7. Response MUST be valid JSON and match this exact schema
+8. DO NOT include any explanation or additional text outside the JSON structure"""

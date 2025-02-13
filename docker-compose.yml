@@ -26,6 +26,7 @@ services:
     image: postgres:14
     ports:
       - "5432:5432"
+    command: postgres -c 'max_connections=100'
     environment:
       POSTGRES_USER: custom_user
       POSTGRES_PASSWORD: strong_password
@@ -78,6 +79,9 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - DROPBOX_ACCESS_TOKEN=${DROPBOX_ACCESS_TOKEN}
       - DROPBOX_FOLDER_PATH=${DROPBOX_FOLDER_PATH}
+      - FLASK_APP=wsgi.py
+      - FLASK_ENV=development
+      - DATABASE_URL=${DATABASE_URL}
     depends_on:
       - redis
       - celery-worker
