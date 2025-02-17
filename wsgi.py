@@ -3,7 +3,6 @@
 import os
 import sys
 
-# Print debugging information
 print("Python version:", sys.version)
 print("Current working directory:", os.getcwd())
 print("Contents of current directory:", os.listdir('.'))

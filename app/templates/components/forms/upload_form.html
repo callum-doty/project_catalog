@@ -1,0 +1,31 @@
+<!-- templates/components/forms/upload_form.html -->
+{% macro upload_form() %}
+<form
+  action="{{ url_for('main_routes.upload_file') }}"
+  method="post"
+  enctype="multipart/form-data"
+  class="space-y-4"
+>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+  <div>
+    <label class="block text-gray-700 text-sm font-bold mb-2" for="file">
+      Select File (PDF, PNG, or Image)
+    </label>
+    <input
+      type="file"
+      name="file"
+      accept=".pdf,.png,.jpg,.jpeg"
+      class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+      required
+    />
+  </div>
+  <div>
+    <button
+      type="submit"
+      class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+    >
+      Upload Document
+    </button>
+  </div>
+</form>
+{% endmacro %}

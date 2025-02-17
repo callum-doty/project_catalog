@@ -1,0 +1,20 @@
+<!-- templates/components/nav/sync_status.html -->
+{% macro sync_status() %}
+<div class="flex items-center space-x-4">
+  <div
+    id="syncStatus"
+    class="text-sm bg-gray-100 rounded-lg px-3 py-2 flex items-center space-x-2"
+  >
+    <span class="sync-indicator w-2 h-2 rounded-full bg-gray-400"></span>
+    <span class="sync-text">Checking sync status...</span>
+  </div>
+  <button
+    onclick="manualSync(event)"
+    id="triggerSyncBtn"
+    class="text-sm bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-3 py-2"
+    type="button"
+  >
+    Sync Now
+  </button>
+</div>
+{% endmacro %}

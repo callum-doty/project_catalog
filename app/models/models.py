@@ -23,6 +23,13 @@ class Document(db.Model):
     status = db.Column(db.Text, nullable=False)
     batch_jobs_id = db.Column(db.Integer, db.ForeignKey('batch_jobs.id'))
 
+    # Relationships
+    llm_analysis = db.relationship('LLMAnalysis', backref='document', lazy='joined', uselist=False)
+    extracted_text = db.relationship('ExtractedText', backref='document', lazy='joined', uselist=False)
+    design_elements = db.relationship('DesignElement', backref='document', lazy='joined', uselist=False)
+    classification = db.relationship('Classification', backref='document', lazy='joined', uselist=False)
+
+
 class DesignElement(db.Model):
     __tablename__ = 'design_elements'
     id = db.Column(db.Integer, primary_key=True)
@@ -43,9 +50,12 @@ class LLMAnalysis(db.Model):
     summary_description = db.Column(db.Text)
     visual_analysis = db.Column(db.Text)
     content_analysis = db.Column(db.Text)
-    confidence_score = db.Column(db.BigInteger)
+    confidence_score = db.Column(db.Float)
     analysis_date = db.Column(db.DateTime(timezone=True))
     model_version = db.Column(db.Text)
+    
+    # Relationship with keywords
+    keywords = db.relationship('LLMKeyword', backref='analysis', lazy='joined')
 
 class Client(db.Model):
     __tablename__ = 'clients'

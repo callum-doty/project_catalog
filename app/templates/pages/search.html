@@ -1,0 +1,37 @@
+<!-- templates/pages/search.html -->
+{% extends "base.html" %} {% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+  <!-- Search Bar -->
+  <div class="mb-8">
+    {% from 'components/forms/search_form.html' import search_form %} {{
+    search_form(query) }}
+  </div>
+
+  <!-- Results Count -->
+  {% if documents %}
+  <div class="mb-4 text-gray-600 document-count">
+    Found {{ documents|length }} document{% if documents|length != 1 %}s{% endif
+    %}
+  </div>
+  {% endif %}
+
+  <!-- Results Grid -->
+  <div
+    class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+    id="resultsGrid"
+  >
+    {% from 'components/cards/document_card.html' import document_card %} {% for
+    doc in documents %} {{ document_card(doc) }} {% endfor %}
+  </div>
+
+  {% if not documents %}
+  <div class="text-center py-8">
+    <p class="text-gray-500">
+      No documents found{% if query %} for "{{ query }}"{% endif %}
+    </p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %} {% block scripts %}
+<script src="{{ url_for('static', filename='js/search.js') }}"></script>
+{% endblock %}

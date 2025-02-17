@@ -1,0 +1,21 @@
+<!-- templates/pages/index.html -->
+{% extends "base.html" %} {% block content %}
+<div class="max-w-2xl mx-auto">
+  <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+    <h1 class="text-2xl font-bold mb-6">Upload Document</h1>
+
+    {% from 'components/forms/upload_form.html' import upload_form %} {{
+    upload_form() }}
+  </div>
+
+  {% if documents %}
+  <div class="bg-white shadow-md rounded px-8 pt-6 pb-8">
+    <h2 class="text-xl font-bold mb-4">Recent Documents</h2>
+    <div class="space-y-4">
+      {% from 'components/cards/document_card.html' import document_card %} {%
+      for doc in documents %} {{ document_card(doc) }} {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
