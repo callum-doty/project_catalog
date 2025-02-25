@@ -73,6 +73,46 @@ class DropboxService:
                 'error': str(e)
             }
 
+    def get_sync_status(self):
+        """Get the current sync status for Dropbox integration"""
+        from datetime import datetime, timedelta
+        from app.models.models import DropboxSync, Document
+        from sqlalchemy import func
+        
+        try:
+            # Test connection first
+            try:
+                connection_status = self.test_connection()
+                dropbox_connected = connection_status.get('connected', False)
+            except Exception as e:
+                logger.error(f"Dropbox connection test failed: {str(e)}")
+                dropbox_connected = False
+            
+            # Get the latest sync record
+            latest_sync = DropboxSync.query.order_by(DropboxSync.sync_date.desc()).first()
+            
+            # Get count of synced files in last 24 hours
+            yesterday = datetime.utcnow() - timedelta(days=1)
+            recent_syncs = DropboxSync.query.filter(DropboxSync.sync_date >= yesterday).count()
+            
+            status = {
+                'last_sync_time': latest_sync.sync_date.isoformat() if latest_sync else None,
+                'last_status': latest_sync.status if latest_sync else None,
+                'last_24h_files': recent_syncs,
+                'dropbox_connected': dropbox_connected
+            }
+            
+            return status
+            
+        except Exception as e:
+            logger.error(f"Error getting Dropbox sync status: {str(e)}")
+            return {
+                'last_sync_time': None,
+                'last_status': 'ERROR',
+                'last_24h_files': 0,
+                'dropbox_connected': False
+            }
+
     def list_new_files(self):
         """List files in Dropbox folder that haven't been processed"""
         try:
@@ -201,3 +241,6 @@ class DropboxService:
             if temp_path and os.path.exists(temp_path):
                 os.remove(temp_path)
                 logger.debug(f"Cleaned up temporary file: {temp_path}")
+
+
+    

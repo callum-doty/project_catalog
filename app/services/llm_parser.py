@@ -50,7 +50,7 @@ class LLMResponseParser:
                     analysis.get('confidence_score', 0.0)
                 ),
                 'analysis_date': datetime.utcnow(),
-                'model_version': 'claude-3'
+                'model_version': 'claude-3-opus-20240229'  # Updated to specific model version
             }
             
             # Log with custom encoder for datetime

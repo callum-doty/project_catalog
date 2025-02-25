@@ -2,9 +2,12 @@
 
 def get_analysis_prompt(filename: str) -> str:
     """
-    Generate a structured analysis prompt that maps directly to database schema with clear type requirements
+    Generate a structured analysis prompt optimized for Claude 3 with enhanced image analysis capabilities
     """
-    return f"""Please analyze the document '{filename}' and provide a structured analysis in the exact format specified below.
+    return f"""Please analyze the document or image '{filename}' and provide a structured analysis in the exact format specified below.
+
+If an image is provided, carefully analyze all visual elements, text content, colors, themes, and design patterns. Look for elements that indicate a campaign, geographic targeting, or demographic focus.
+
 Required Output Format:
 {{
     "document_analysis": {{
@@ -59,4 +62,6 @@ Important Requirements:
 5. Geographic locations MUST use standardized format (City, State or State only)
 6. All fields are required - provide reasonable default values if information is unclear
 7. Response MUST be valid JSON and match this exact schema
-8. DO NOT include any explanation or additional text outside the JSON structure"""
+8. DO NOT include any explanation or additional text outside the JSON structure
+9. For images: carefully transcribe any visible text, identify logos, and analyze visual elements
+10. For confidence scores: higher values (closer to 1.0) indicate greater certainty about your analysis"""

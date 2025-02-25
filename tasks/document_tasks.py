@@ -25,6 +25,16 @@ class DocumentProcessor(Task):
             from app.services.llm_service import LLMService
             self._llm_service = LLMService()
         return self._llm_service
+    
+    def download_temp_file(self, filename):
+        """Download file to temp location for processing"""
+        try:
+            temp_path = f"/tmp/{filename}"
+            self.storage.download_file(filename, temp_path)
+            return temp_path
+        except Exception as e:
+            logger.error(f"Error downloading file: {str(e)}")
+            return None
 
 @celery_app.task(bind=True, base=DocumentProcessor)
 @handle_task_failure
@@ -45,16 +55,40 @@ def process_document(self, filename: str, minio_path: str, document_id: int):
         try:
             logger.info(f"Starting analysis for document: {filename}")
             
+            # Download the file for potential image analysis
+            temp_path = None
+            image_path = None
+            
+            if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
+                
+                image_path = self.download_temp_file(filename)
+            elif filename.lower().endswith('.pdf'):
+                # For PDFs, download for potential text extraction
+                temp_path = self.download_temp_file(filename)
+                # You could extract the first page as an image here if needed
+                # For example: image_path = extract_first_page_as_image(temp_path)
+            
             # Initialize LLM service and analyze
-            response = self.llm_service.analyze_document(filename)
-            
-            # Store results
-            store_analysis_results(document_id, response)
-            
-            # Update status
-            doc.status = TASK_STATUSES['COMPLETED']
-            db.session.commit()
-            logger.info(f"Analysis completed successfully")
+            try:
+                # Include image path if available
+                if image_path:
+                    response = self.llm_service.analyze_document(filename, image_path=image_path)
+                else:
+                    response = self.llm_service.analyze_document(filename)
+                
+                # Store results
+                store_analysis_results(document_id, response)
+                
+                # Update status
+                doc.status = TASK_STATUSES['COMPLETED']
+                db.session.commit()
+                logger.info(f"Analysis completed successfully")
+            finally:
+                # Clean up temporary files
+                if temp_path and os.path.exists(temp_path):
+                    os.remove(temp_path)
+                if image_path and os.path.exists(image_path) and image_path != temp_path:
+                    os.remove(image_path)
 
             return True
 
@@ -79,7 +113,7 @@ def store_analysis_results(document_id: int, response: dict):
             content_analysis=json.dumps(response),
             confidence_score=float(analysis_data.get('confidence_score', 0.9)),
             analysis_date=datetime.utcnow(),
-            model_version='claude-2'
+            model_version='claude-3-opus-20240229'  # Updated to Claude 3 Opus
         )
         db.session.add(llm_analysis)
         db.session.flush()  # Get the ID for keywords

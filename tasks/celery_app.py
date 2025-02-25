@@ -2,6 +2,7 @@
 
 from celery import Celery
 from celery.utils.log import get_task_logger
+from celery.schedules import crontab
 
 # Initialize Celery
 celery_app = Celery('tasks', broker='redis://redis:6379/0')
@@ -24,5 +25,12 @@ celery_app.conf.update(
     },
     broker_connection_retry_on_startup=True
 )
+
+celery_app.conf.beat_schedule = {
+    'sync-dropbox-every-5-minutes': {
+        'task': 'tasks.dropbox_tasks.sync_dropbox',
+        'schedule': crontab(minute='*/5'),  # Run every 5 minutes
+    },
+}
 
 logger = get_task_logger(__name__)
