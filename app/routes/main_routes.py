@@ -209,3 +209,97 @@ def get_sync_status():
             'last_status': 'ERROR',
             'dropbox_connected': False
         })
+
+
+
+@main_routes.route('/api/reprocess-failed', methods=['POST'])
+def reprocess_failed():
+    """API endpoint to reprocess failed documents"""
+    try:
+        from tasks.recovery_tasks import reprocess_failed_documents
+        
+        # Get parameters with defaults
+        delay_seconds = int(request.json.get('delay_seconds', 10))
+        batch_size = int(request.json.get('batch_size', 5))
+        
+        # Validate parameters
+        if delay_seconds < 0:
+            delay_seconds = 0
+        if batch_size < 1:
+            batch_size = 1
+        elif batch_size > 20:
+            batch_size = 20
+            
+        # Start the task
+        task = reprocess_failed_documents.delay(delay_seconds, batch_size)
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Started reprocessing failed documents (batch size: {batch_size}, delay: {delay_seconds}s)',
+            'task_id': task.id
+        })
+    except Exception as e:
+        current_app.logger.error(f"Error reprocessing failed documents: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+        
+@main_routes.route('/api/reprocess-document/<int:document_id>', methods=['POST'])
+def reprocess_document(document_id):
+    """API endpoint to reprocess a specific document by ID"""
+    try:
+        from tasks.recovery_tasks import reprocess_specific_document
+        
+        # Start the task
+        task = reprocess_specific_document.delay(document_id)
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Started reprocessing document ID: {document_id}',
+            'task_id': task.id
+        })
+    except Exception as e:
+        current_app.logger.error(f"Error reprocessing document {document_id}: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@main_routes.route('/recovery-dashboard')
+def recovery_dashboard():
+    """View to display failed documents and recovery options"""
+    try:
+        # Get counts for different statuses
+        from app.models.models import Document
+        from tasks.utils import TASK_STATUSES
+        
+        status_counts = {}
+        total_docs = Document.query.count()
+        
+        for status_name, status_value in TASK_STATUSES.items():
+            count = Document.query.filter_by(status=status_value).count()
+            status_counts[status_name] = count
+        
+        # Get the most recent failed documents
+        failed_docs = Document.query.filter_by(status=TASK_STATUSES['FAILED']).order_by(Document.upload_date.desc()).limit(10).all()
+        
+        formatted_failed_docs = []
+        for doc in failed_docs:
+            formatted_failed_docs.append({
+                'id': doc.id,
+                'filename': doc.filename,
+                'upload_date': doc.upload_date.strftime('%Y-%m-%d %H:%M:%S'),
+                'file_size': doc.file_size
+            })
+        
+        return render_template(
+            'pages/recovery.html',
+            total_docs=total_docs,
+            status_counts=status_counts,
+            failed_docs=formatted_failed_docs
+        )
+    except Exception as e:
+        current_app.logger.error(f"Error loading recovery dashboard: {str(e)}")
+        flash(f"Error loading recovery dashboard: {str(e)}", "error")
+        return redirect(url_for('main_routes.index'))

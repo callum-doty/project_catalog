@@ -22,6 +22,8 @@ celery_app.conf.update(
     task_routes={
         'tasks.document_tasks.process_document': {'queue': 'document_processing'},
         'tasks.dropbox_tasks.sync_dropbox': {'queue': 'document_processing'},
+        'tasks.reprocess_failed_documents': {'queue': 'celery'}, 
+        'tasks.reprocess_specific_document': {'queue': 'celery'}  
     },
     broker_connection_retry_on_startup=True
 )

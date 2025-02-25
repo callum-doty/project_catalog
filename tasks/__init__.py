@@ -1,11 +1,13 @@
 # tasks/__init__.py
-
 from .celery_app import celery_app
-from .utils import TASK_STATUSES, handle_task_failure, logger
+from .document_tasks import process_document
+from .dropbox_tasks import sync_dropbox
+from .recovery_tasks import reprocess_failed_documents, reprocess_specific_document
 
 __all__ = [
     'celery_app',
-    'TASK_STATUSES',
-    'handle_task_failure',
-    'logger'
+    'process_document',
+    'sync_dropbox',
+    'reprocess_failed_documents',
+    'reprocess_specific_document'
 ]
