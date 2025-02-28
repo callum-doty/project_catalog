@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="flex justify-between items-center mb-6">
+    <h1 class="text-2xl font-bold">System Performance Metrics</h1>
+    
+    <!-- Time Period Selector -->
+    <div class="flex items-center space-x-2">
+      <span class="text-sm text-gray-500">Time Period:</span>
+      <select id="timePeriodSelect" class="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+        <option value="7" {% if days == 7 %}selected{% endif %}>Last 7 Days</option>
+        <option value="30" {% if days == 30 %}selected{% endif %}>Last 30 Days</option>
+        <option value="90" {% if days == 90 %}selected{% endif %}>Last 90 Days</option>
+        <option value="365" {% if days == 365 %}selected{% endif %}>Last Year</option>
+      </select>
+    </div>
+  </div>
+  
+  <!-- KPI Overview Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+    <!-- Processing Success Rate -->
+    <div class="bg-white rounded-lg shadow p-6">
+      <div class="flex justify-between items-start">
+        <div>
+          <p class="text-sm font-medium text-gray-500">Success Rate</p>
+          <p class="text-3xl font-bold text-gray-900">{{ "%.1f"|format(metrics.processing_success_rate) }}%</p>
+        </div>
+        <div class="p-2 rounded-md bg-blue-50">
+          <svg class="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+        </div>
+      </div>
+      <p class="mt-2 text-sm text-gray-500">Documents successfully processed</p>
+    </div>
+    
+    <!-- Text Extraction Accuracy -->
+    <div class="bg-white rounded-lg shadow p-6">
+      <div class="flex justify-between items-start">
+        <div>
+          <p class="text-sm font-medium text-gray-500">Text Extraction</p>
+          <p class="text-3xl font-bold text-gray-900">{{ "%.1f"|format(metrics.confidence_scores.text_extraction) }}%</p>
+        </div>
+        <div class="p-2 rounded-md bg-green-50">
+          <svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"></path>
+          </svg>
+        </div>
+      </div>
+      <p class="mt-2 text-sm text-gray-500">Average text extraction confidence</p>
+    </div>
+    
+    <!-- Classification Accuracy -->
+    <div class="bg-white rounded-lg shadow p-6">
+      <div class="flex justify-between items-start">
+        <div>
+          <p class="text-sm font-medium text-gray-500">Classification</p>
+          <p class="text-3xl font-bold text-gray-900">{{ "%.1f"|format(metrics.confidence_scores.classification) }}%</p>
+        </div>
+        <div class="p-2 rounded-md bg-purple-50">
+          <svg class="w-6 h-6 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path>
+          </svg>
+        </div>
+      </div>
+      <p class="mt-2 text-sm text-gray-500">Average classification confidence</p>
+    </div>
+    
+    <!-- Processing Time -->
+    <div class="bg-white rounded-lg shadow p-6">
+      <div class="flex justify-between items-start">
+        <div>
+          <p class="text-sm font-medium text-gray-500">Processing Time</p>
+          <p class="text-3xl font-bold text-gray-900">{{ metrics.processing_times.average }}</p>
+        </div>
+        <div class="p-2 rounded-md bg-yellow-50">
+          <svg class="w-6 h-6 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+        </div>
+      </div>
+      <p class="mt-2 text-sm text-gray-500">Average document processing time</p>
+    </div>
+  </div>
+  
+  <!-- Document Processing Stats -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+    <!-- Document Status Chart -->
+    <div class="bg-white rounded-lg shadow p-6 col-span-1">
+      <h2 class="text-lg font-medium text-gray-900 mb-4">Document Status</h2>
+      <div class="relative" style="height: 300px">
+        <canvas id="documentStatusChart" data-values="{{ [metrics.document_counts.completed, metrics.document_counts.failed, metrics.document_counts.pending, metrics.document_counts.processing]|tojson }}"></canvas>
+      </div>
+      <div class="grid grid-cols-2 gap-4 mt-4">
+        <div class="text-center p-2 bg-gray-50 rounded">
+          <p class="text-sm text-gray-500">Total Documents</p>
+          <p class="text-lg font-semibold">{{ metrics.document_counts.total }}</p>
+        </div>
+        <div class="text-center p-2 bg-gray-50 rounded">
+          <p class="text-sm text-gray-500">Completion Rate</p>
+          <p class="text-lg font-semibold">{{ "%.1f"|format(metrics.processing_success_rate) }}%</p>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Daily Processing Volume -->
+    <div class="bg-white rounded-lg shadow p-6 col-span-2">
+      <h2 class="text-lg font-medium text-gray-900 mb-4">Daily Processing Volume</h2>
+      <div class="relative" style="height: 300px">
+        <canvas id="dailyProcessingChart" 
+                data-labels="{{ metrics.daily_processing|map(attribute='date')|list|tojson }}"
+                data-completed="{{ metrics.daily_processing|map(attribute='completed')|list|tojson }}"
+                data-failed="{{ metrics.daily_processing|map(attribute='failed')|list|tojson }}"
+                data-total="{{ metrics.daily_processing|map(attribute='total')|list|tojson }}"
+                data-success-rate="{{ metrics.daily_processing|map(attribute='success_rate')|list|tojson }}"></canvas>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Detailed Metrics -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+    <!-- File Type Distribution -->
+    <div class="bg-white rounded-lg shadow p-6">
+      <h2 class="text-lg font-medium text-gray-900 mb-4">File Type Distribution</h2>
+      <div class="relative" style="height: 220px">
+        <canvas id="fileTypeChart" 
+                data-labels="{{ metrics.file_types.keys()|list|tojson if metrics.file_types is mapping else []|tojson }}"
+                data-values="{{ metrics.file_types.values()|list|tojson if metrics.file_types is mapping else []|tojson }}"></canvas>
+      </div>
+    </div>
+    
+    <!-- Confidence Scores -->
+    <div class="bg-white rounded-lg shadow p-6">
+      <h2 class="text-lg font-medium text-gray-900 mb-4">Confidence Scores</h2>
+      <div class="relative" style="height: 220px">
+        <canvas id="confidenceChart" 
+                data-values="{{ [metrics.confidence_scores.text_extraction, metrics.confidence_scores.classification, metrics.confidence_scores.llm_analysis]|tojson }}"></canvas>
+      </div>
+    </div>
+    
+    <!-- Performance Metrics -->
+    <div class="bg-white rounded-lg shadow p-6">
+      <h2 class="text-lg font-medium text-gray-900 mb-4">Performance Metrics</h2>
+      <div class="space-y-4">
+        <div>
+          <div class="flex justify-between mb-1">
+            <span class="text-sm font-medium text-gray-500">Search Response Time</span>
+            <span class="text-sm font-medium text-gray-700">{{ metrics.search_response_time }}</span>
+          </div>
+        </div>
+        
+        <div>
+          <div class="flex justify-between mb-1">
+            <span class="text-sm font-medium text-gray-500">PDF Processing Time</span>
+            <span class="text-sm font-medium text-gray-700">{{ metrics.processing_times.pdf }}</span>
+          </div>
+        </div>
+        
+        <div>
+          <div class="flex justify-between mb-1">
+            <span class="text-sm font-medium text-gray-500">Image Processing Time</span>
+            <span class="text-sm font-medium text-gray-700">{{ metrics.processing_times.image }}</span>
+          </div>
+        </div>
+        
+        <div>
+          <div class="flex justify-between mb-1">
+            <span class="text-sm font-medium text-gray-500">LLM Analysis Confidence</span>
+            <span class="text-sm font-medium text-gray-700">{{ "%.1f"|format(metrics.confidence_scores.llm_analysis) }}%</span>
+          </div>
+          <div class="w-full bg-gray-200 rounded-full h-2.5">
+            <div class="bg-blue-600 h-2.5 rounded-full confidence-bar" data-width="{{ metrics.confidence_scores.llm_analysis }}"></div>
+          </div>
+        </div>
+        
+        <div>
+          <div class="flex justify-between mb-1">
+            <span class="text-sm font-medium text-gray-500">This Page Load Time</span>
+            <span class="text-sm font-medium text-gray-700">{{ metrics.metrics_query_time }} ms</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Load external libraries and scripts -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="{{ url_for('static', filename='js/metrics-dashboard.js') }}"></script>
+{% endblock %}

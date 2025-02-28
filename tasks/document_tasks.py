@@ -2,6 +2,7 @@
 
 import os
 from datetime import datetime
+import time
 import json
 from celery import Task
 from .celery_app import celery_app, logger
@@ -39,7 +40,7 @@ class DocumentProcessor(Task):
 @celery_app.task(bind=True, base=DocumentProcessor)
 @handle_task_failure
 def process_document(self, filename: str, minio_path: str, document_id: int):
-    """Process document through the pipeline"""
+    """Process document through the pipeline and track processing time"""
     # Import Flask app here to avoid circular imports
     from app import create_app
     app = create_app()
@@ -52,6 +53,9 @@ def process_document(self, filename: str, minio_path: str, document_id: int):
         doc.status = TASK_STATUSES['PROCESSING']
         db.session.commit()
 
+        # Start timing the processing
+        start_time = time.time()
+
         try:
             logger.info(f"Starting analysis for document: {filename}")
             
@@ -60,13 +64,12 @@ def process_document(self, filename: str, minio_path: str, document_id: int):
             image_path = None
             
             if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
-                
+                # If it's an image file, use it directly for image analysis
                 image_path = self.download_temp_file(filename)
             elif filename.lower().endswith('.pdf'):
                 # For PDFs, download for potential text extraction
                 temp_path = self.download_temp_file(filename)
                 # You could extract the first page as an image here if needed
-                # For example: image_path = extract_first_page_as_image(temp_path)
             
             # Initialize LLM service and analyze
             try:
@@ -79,10 +82,16 @@ def process_document(self, filename: str, minio_path: str, document_id: int):
                 # Store results
                 store_analysis_results(document_id, response)
                 
-                # Update status
+                # Calculate processing time
+                processing_time = time.time() - start_time
+                
+                # Update document with processing time and complete status
+                doc.processing_time = processing_time
                 doc.status = TASK_STATUSES['COMPLETED']
                 db.session.commit()
-                logger.info(f"Analysis completed successfully")
+                
+                logger.info(f"Analysis completed successfully in {processing_time:.2f} seconds")
+                
             finally:
                 # Clean up temporary files
                 if temp_path and os.path.exists(temp_path):
@@ -93,9 +102,13 @@ def process_document(self, filename: str, minio_path: str, document_id: int):
             return True
 
         except Exception as e:
-            logger.error(f"Document processing failed: {str(e)}", exc_info=True)
+            # Still record the processing time even for failures
+            processing_time = time.time() - start_time
+            doc.processing_time = processing_time
             doc.status = TASK_STATUSES['FAILED']
             db.session.commit()
+            
+            logger.error(f"Document processing failed after {processing_time:.2f} seconds: {str(e)}", exc_info=True)
             raise
 
 def store_analysis_results(document_id: int, response: dict):

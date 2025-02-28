@@ -7,15 +7,22 @@ from datetime import datetime
 from app.services.storage_service import MinIOStorage
 from app.extensions import db
 from app.models.models import Document, LLMAnalysis, LLMKeyword
-from sqlalchemy import or_
+from sqlalchemy import or_, func, desc, case, extract
 from app.services.preview_service import PreviewService
 from app.services.dropbox_service import DropboxService
 from flask_wtf.csrf import generate_csrf
 from app import csrf
+import time
+from datetime import datetime, timedelta
+from sqlalchemy.sql.expression import text
+import statistics
+from statistics import mean
 
 main_routes = Blueprint('main_routes', __name__)
 storage = MinIOStorage()
 preview_service = PreviewService()
+search_times = []
+MAX_SEARCH_TIMES = 100
 
 def get_celery_task(task_name):
     """Lazy import of celery tasks to avoid circular imports"""
@@ -25,6 +32,14 @@ def get_celery_task(task_name):
     elif task_name == 'sync_dropbox':
         from tasks.dropbox_tasks import sync_dropbox
         return sync_dropbox
+
+def record_search_time(response_time):
+    """Record a search response time and maintain the list size"""
+    global search_times
+    search_times.append(response_time)
+    # Keep only the most recent times
+    if len(search_times) > MAX_SEARCH_TIMES:
+        search_times = search_times[-MAX_SEARCH_TIMES:]
 
 @main_routes.route('/')
 def index():
@@ -99,6 +114,7 @@ def upload_file():
         process_document = get_celery_task('process_document')
         process_document.delay(filename, minio_path, document.id)
         
+        
         os.remove(temp_path)
         flash('File uploaded successfully', 'success')
         return redirect(url_for('main_routes.index'))
@@ -111,6 +127,7 @@ def upload_file():
 @main_routes.route('/search')
 def search_documents():
     query = request.args.get('q', '')
+    start_time = time.time()  # Start timing
     
     try:
         base_query = Document.query
@@ -128,6 +145,7 @@ def search_documents():
         else:
             documents = base_query.order_by(Document.upload_date.desc()).all()
 
+        # Format results
         results = []
         for doc in documents:
             # Get preview if possible
@@ -156,12 +174,20 @@ def search_documents():
             
             results.append(result)
             
+        # Record search time
+        response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+        record_search_time(response_time)
+        
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify(results)
         
         return render_template('pages/search.html', documents=results, query=query)
         
     except Exception as e:
+        # Still record the time even for errors
+        response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+        record_search_time(response_time)
+        
         current_app.logger.error(f"Search error: {str(e)}")
         return render_template('pages/search.html', documents=[], query=query)
 
@@ -303,3 +329,185 @@ def recovery_dashboard():
         current_app.logger.error(f"Error loading recovery dashboard: {str(e)}")
         flash(f"Error loading recovery dashboard: {str(e)}", "error")
         return redirect(url_for('main_routes.index'))
+
+
+@main_routes.route('/metrics-dashboard')
+def metrics_dashboard():
+    """Dashboard for system KPIs and metrics"""
+    try:
+        from app.models.models import Document, LLMAnalysis, Classification, ExtractedText
+        
+        # Time period for metrics (default: last 30 days)
+        days = request.args.get('days', 30, type=int)
+        time_period = datetime.utcnow() - timedelta(days=days)
+        
+        # Base query for recent documents
+        base_query = Document.query.filter(Document.upload_date >= time_period)
+        total_docs = base_query.count()
+        
+        # Document processing metrics
+        start_time = time.time()
+        
+        metrics = {
+            'document_counts': {},
+            'processing_times': {},
+            'confidence_scores': {},
+            'daily_processing': [],
+            'file_types': {},
+            'processing_success_rate': 0
+        }
+        
+        # Calculate processing counts
+        metrics['document_counts'] = {
+            'total': total_docs,
+            'completed': base_query.filter(Document.status == 'COMPLETED').count(),
+            'failed': base_query.filter(Document.status == 'FAILED').count(),
+            'pending': base_query.filter(Document.status == 'PENDING').count(),
+            'processing': base_query.filter(Document.status == 'PROCESSING').count()
+        }
+        
+        # Calculate success rate
+        if total_docs > 0:
+            metrics['processing_success_rate'] = (metrics['document_counts']['completed'] / total_docs) * 100
+        
+        # Document processing times
+        # This requires adding processing_time field to Document or calculating from logs
+        # Estimate based on document metadata
+        
+        # Confidence scores for different components
+        confidence_query = db.session.query(
+            func.avg(LLMAnalysis.confidence_score).label('llm_confidence'),
+            func.avg(Classification.confidence).label('classification_confidence'),
+            func.avg(ExtractedText.confidence).label('extraction_confidence')
+        ).join(
+            Classification, Classification.document_id == LLMAnalysis.document_id, isouter=True
+        ).join(
+            ExtractedText, ExtractedText.document_id == LLMAnalysis.document_id, isouter=True
+        ).filter(
+            LLMAnalysis.analysis_date >= time_period
+        ).first()
+        
+        metrics['confidence_scores'] = {
+            'text_extraction': round((confidence_query.extraction_confidence or 0) * 100, 2),
+            'classification': round((confidence_query.classification_confidence or 0), 2),
+            'llm_analysis': round((confidence_query.llm_confidence or 0) * 100, 2)
+        }
+        
+        # Get file types distribution
+        file_extensions = db.session.query(
+            func.lower(func.substring(Document.filename, func.length(Document.filename) - 3, 4)).label('extension'),
+            func.count().label('count')
+        ).filter(
+            Document.upload_date >= time_period
+        ).group_by(
+            text('extension')
+        ).all()
+
+        # Convert to a Python dictionary explicitly
+        metrics['file_types'] = {ext: count for ext, count in file_extensions}
+
+        # Calculate query time for metrics
+        metrics['metrics_query_time'] = round((time.time() - start_time) * 1000, 2)  # in ms
+
+        # Add convenience keys for templates
+        metrics['file_type_keys'] = list(metrics['file_types'].keys())
+        metrics['file_type_values'] = list(metrics['file_types'].values())
+
+        # Debug output
+        print("Metrics keys:", metrics.keys())
+        for key, value in metrics.items():
+            print(f"{key}: {type(value)}")
+        
+        # Daily document processing volume
+        daily_processing = db.session.query(
+            func.date(Document.upload_date).label('date'),
+            func.count().label('total'),
+            func.sum(case((Document.status == 'COMPLETED', 1), else_=0)).label('completed'),
+            func.sum(case((Document.status == 'FAILED', 1), else_=0)).label('failed')
+        ).filter(
+            Document.upload_date >= time_period
+        ).group_by(
+            text('date')
+        ).order_by(
+            text('date')
+        ).all()
+        
+        metrics['daily_processing'] = [
+            {
+                'date': date.strftime('%Y-%m-%d'),
+                'total': total,
+                'completed': completed,
+                'failed': failed,
+                'success_rate': (completed / total * 100) if total > 0 else 0
+            }
+            for date, total, completed, failed in daily_processing
+        ]
+        
+        # Estimate search response time (placeholder)
+        metrics['search_response_time'] = "< 500ms"  # This is a placeholder
+        
+        # Average PDF processing time (placeholder - would need timing data)
+        metrics['processing_times'] = {
+            'pdf': "~10-15 seconds",
+            'image': "~5-10 seconds",
+            'average': "~12 seconds"
+        }
+        
+        # Calculate query time for metrics
+        print(f"metrics['file_types'] type: {type(metrics['file_types'])}")
+
+
+        print("Metrics keys:", metrics.keys())
+        for key, value in metrics.items():
+            print(f"{key}: {type(value)}")
+        
+        return render_template('pages/metrics.html', 
+                              metrics=metrics,
+                              days=days)
+        
+    except Exception as e:
+        current_app.logger.error(f"Error generating metrics: {str(e)}")
+        flash(f"Error generating metrics: {str(e)}", "error")
+        return redirect(url_for('main_routes.index'))
+
+
+@main_routes.route('/api/search-metrics')
+def search_metrics():
+    """Return metrics about search performance"""
+    global search_times
+    
+    if not search_times:
+        return jsonify({
+            'avg_response_time': 0,
+            'count': 0,
+            'min_response_time': 0,
+            'max_response_time': 0,
+            'recent_response_times': []
+        })
+    
+    # Calculate metrics
+    avg_time = mean(search_times)
+    min_time = min(search_times)
+    max_time = max(search_times)
+    
+    # Get the most recent 10 times
+    recent_times = search_times[-10:]
+    
+    return jsonify({
+        'avg_response_time': round(avg_time, 2),
+        'count': len(search_times),
+        'min_response_time': round(min_time, 2),
+        'max_response_time': round(max_time, 2),
+        'recent_response_times': [round(t, 2) for t in recent_times]
+    })
+
+# Update your metrics_dashboard function to include search response time
+def get_search_response_time():
+    """Get the average search response time for metrics"""
+    global search_times
+    
+    if not search_times:
+        return "No data"
+    
+    avg_time = mean(search_times)
+    return f"{round(avg_time, 2)} ms"

@@ -18,6 +18,7 @@ class Document(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     filename = db.Column(db.Text, nullable=False)
     upload_date = db.Column(db.DateTime(timezone=True), nullable=False)
+    processing_time = db.Column(db.Float, nullable=True)
     file_size = db.Column(db.BigInteger, nullable=False)
     page_count = db.Column(db.Integer, nullable=False)
     status = db.Column(db.Text, nullable=False)

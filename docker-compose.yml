@@ -3,7 +3,7 @@ services:
     build: .
     env_file: .env
     ports:
-      - "5001:5000"
+      - "0.0.0.0:5001:5000"
     environment:
       - FLASK_APP=wsgi.py
       - DATABASE_URL=postgresql://custom_user:strong_password@db:5432/catalog_db
@@ -47,8 +47,8 @@ services:
   minio:
     image: minio/minio
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "0.0.0.0:9000:9000"
+      - "0.0.0.0:9001:9001"
     environment:
       - MINIO_ACCESS_KEY=minioaccess
       - MINIO_SECRET_KEY=miniosecret
@@ -98,7 +98,7 @@ services:
       - DROPBOX_FOLDER_PATH=${DROPBOX_FOLDER_PATH}
     depends_on:
       - redis
-      
+
 volumes:
   postgres_data:
   minio_data:
