@@ -1,4 +1,7 @@
 #!/bin/bash
+# Create temp directory
+mkdir -p ./tmp
+export TMPDIR=$(pwd)/tmp
 # start.sh - Script to start the application on Railway
 
 set -e  # Exit immediately if a command exits with a non-zero status
@@ -8,7 +11,7 @@ echo "Starting application with Python $(python --version)"
 echo "Current directory: $(pwd)"
 
 # Create necessary directories
-mkdir -p /data/documents
+mkdir -p ./data/documents
 
 # Create simple healthy response for healthcheck
 mkdir -p app/static
