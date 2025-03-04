@@ -1,12 +1,15 @@
 # tasks/document_tasks.py
 
 import os
-from datetime import datetime
 import time
 import json
 from celery import Task
 from .celery_app import celery_app, logger
 from .utils import TASK_STATUSES, handle_task_failure
+from app.models.models import Document, LLMAnalysis, LLMKeyword, Classification, DesignElement, ExtractedText, DropboxSync  
+from datetime import datetime, timedelta
+from app.services.storage_service import MinIOStorage
+from app.extensions import db
 
 class DocumentProcessor(Task):
     abstract = True
@@ -159,3 +162,46 @@ def store_analysis_results(document_id: int, response: dict):
         logger.error(f"Error storing analysis results: {str(e)}")
         db.session.rollback()
         raise
+
+
+
+@celery_app.task(name='tasks.recover_pending_documents')
+def recover_pending_documents():
+    """Identify and recover documents stuck in PENDING state"""
+    from app import create_app
+    app = create_app()
+    
+    with app.app_context():
+        # Get documents stuck in PENDING state for more than 1 hour
+        one_hour_ago = datetime.utcnow() - timedelta(hours=1)
+        stuck_documents = Document.query.filter_by(status='PENDING') \
+            .filter(Document.upload_date < one_hour_ago) \
+            .all()
+        
+        logger.info(f"Found {len(stuck_documents)} documents stuck in PENDING state")
+        
+        storage = MinIOStorage()  # Initialize storage service
+        
+        for doc in stuck_documents:
+            try:
+                # Check if document exists in MinIO
+                minio_path = f"{storage.bucket}/{doc.filename}"
+                try:
+                    storage.client.stat_object(storage.bucket, doc.filename)
+                    file_exists = True
+                except:
+                    file_exists = False
+                
+                if file_exists:
+                    # Reprocess the document
+                    logger.info(f"Reprocessing stuck document: {doc.filename}")
+                    process_document.delay(doc.filename, minio_path, doc.id)
+                else:
+                    # Mark as failed if file doesn't exist
+                    logger.error(f"Document file not found in storage: {doc.filename}")
+                    doc.status = 'FAILED'
+                    db.session.commit()
+            except Exception as e:
+                logger.error(f"Error recovering document {doc.id}: {str(e)}")
+        
+        return f"Processed {len(stuck_documents)} stuck documents"

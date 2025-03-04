@@ -1,0 +1,102 @@
+<!-- app/templates/pages/recover_pending.html -->
+{% extends "base.html" %} {% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+  <div class="bg-white rounded-lg shadow p-6 mb-6">
+    <h1 class="text-2xl font-bold mb-4">Recover Pending Documents</h1>
+    <p class="mb-4">Found {{ count }} documents stuck in PENDING state</p>
+
+    {% if documents %}
+    <form
+      method="post"
+      action="{{ url_for('main_routes.recover_pending_documents') }}"
+    >
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+      <div class="mb-6">
+        <div class="mb-2 font-medium">Actions:</div>
+        <div class="flex space-x-4">
+          <button
+            type="submit"
+            name="action"
+            value="retry"
+            class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            Retry Processing
+          </button>
+          <button
+            type="submit"
+            name="action"
+            value="fail"
+            class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700"
+          >
+            Mark as Failed
+          </button>
+          <button
+            type="submit"
+            name="action"
+            value="delete"
+            class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+            onclick="return confirm('Are you sure you want to delete these documents? This cannot be undone.')"
+          >
+            Delete Documents
+          </button>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="min-w-full bg-white border">
+          <thead>
+            <tr>
+              <th class="py-2 px-4 border-b border-r">
+                <input type="checkbox" id="select-all" onclick="toggleAll()" />
+              </th>
+              <th class="py-2 px-4 border-b border-r text-left">ID</th>
+              <th class="py-2 px-4 border-b border-r text-left">Filename</th>
+              <th class="py-2 px-4 border-b border-r text-left">Upload Date</th>
+              <th class="py-2 px-4 border-b text-left">File Size</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for doc in documents %}
+            <tr>
+              <td class="py-2 px-4 border-b border-r text-center">
+                <input
+                  type="checkbox"
+                  name="document_ids"
+                  value="{{ doc.id }}"
+                  class="doc-checkbox"
+                />
+              </td>
+              <td class="py-2 px-4 border-b border-r">{{ doc.id }}</td>
+              <td class="py-2 px-4 border-b border-r">{{ doc.filename }}</td>
+              <td class="py-2 px-4 border-b border-r">
+                {{ doc.upload_date.strftime('%Y-%m-%d %H:%M:%S') }}
+              </td>
+              <td class="py-2 px-4 border-b">
+                {% if doc.file_size > 1048576 %} {{ (doc.file_size / 1048576) |
+                round(2) }} MB {% else %} {{ (doc.file_size / 1024) | round(2)
+                }} KB {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+
+    <script>
+      function toggleAll() {
+        const selectAll = document.getElementById("select-all");
+        const checkboxes = document.getElementsByClassName("doc-checkbox");
+
+        for (let checkbox of checkboxes) {
+          checkbox.checked = selectAll.checked;
+        }
+      }
+    </script>
+    {% else %}
+    <p>No pending documents found.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

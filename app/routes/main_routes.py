@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 from app.services.storage_service import MinIOStorage
 from app.extensions import db
-from app.models.models import Document, LLMAnalysis, LLMKeyword
+from app.models.models import Document, LLMAnalysis, LLMKeyword, Classification, DesignElement, ExtractedText, DropboxSync   
 from sqlalchemy import or_, func, desc, case, extract
 from app.services.preview_service import PreviewService
 from app.services.dropbox_service import DropboxService
@@ -291,6 +291,87 @@ def reprocess_document(document_id):
             'status': 'error',
             'message': str(e)
         }), 500
+
+
+@main_routes.route('/admin/recover-pending', methods=['GET', 'POST'])
+def recover_pending_documents():
+    """Admin route to recover documents stuck in PENDING state"""
+    if request.method == 'POST':
+        action = request.form.get('action')
+        document_ids = request.form.getlist('document_ids')
+        
+        if not document_ids:
+            flash('No documents selected', 'error')
+            return redirect(url_for('main_routes.recover_pending_documents'))
+            
+        count = 0
+        
+        # Convert string IDs to integers
+        doc_ids = [int(doc_id) for doc_id in document_ids if doc_id.isdigit()]
+        
+        if action == 'retry':
+            # Reprocess selected documents
+            for doc_id in doc_ids:
+                doc = Document.query.get(doc_id)
+                if doc and doc.status == 'PENDING':
+                    # Queue for reprocessing with the document task
+                    from tasks.document_tasks import process_document
+                    minio_path = f"{storage.bucket}/{doc.filename}"
+                    process_document.delay(doc.filename, minio_path, doc.id)
+                    count += 1
+            
+            flash(f'Requeued {count} documents for processing', 'success')
+            
+        elif action == 'fail':
+            # Mark selected documents as failed
+            for doc_id in doc_ids:
+                doc = Document.query.get(doc_id)
+                if doc and doc.status == 'PENDING':
+                    doc.status = 'FAILED'
+                    count += 1
+            
+            db.session.commit()
+            flash(f'Marked {count} documents as FAILED', 'success')
+            
+        elif action == 'delete':
+            # Delete selected documents
+            for doc_id in doc_ids:
+                doc = Document.query.get(doc_id)
+                if doc and doc.status == 'PENDING':
+                    # Delete related records
+                    LLMKeyword.query.filter(LLMKeyword.llm_analysis_id.in_(
+                        db.session.query(LLMAnalysis.id).filter_by(document_id=doc.id)
+                    )).delete(synchronize_session=False)
+                    LLMAnalysis.query.filter_by(document_id=doc.id).delete()
+                    Classification.query.filter_by(document_id=doc.id).delete()
+                    DesignElement.query.filter_by(document_id=doc.id).delete()
+                    ExtractedText.query.filter_by(document_id=doc.id).delete()
+                    DropboxSync.query.filter_by(document_id=doc.id).delete()
+                    
+                    # Try to delete from MinIO
+                    try:
+                        storage.client.remove_object(storage.bucket, doc.filename)
+                    except:
+                        pass
+                    
+                    # Delete document record
+                    db.session.delete(doc)
+                    count += 1
+            
+            db.session.commit()
+            flash(f'Deleted {count} documents', 'success')
+        
+        return redirect(url_for('main_routes.recover_pending_documents'))
+    
+    # Get pending documents
+    pending_docs = Document.query.filter_by(status='PENDING').all()
+    
+    return render_template(
+        'pages/recover_pending.html', 
+        documents=pending_docs,
+        count=len(pending_docs)
+    )
+
 
 @main_routes.route('/recovery-dashboard')
 def recovery_dashboard():
