@@ -3,9 +3,26 @@
 from celery import Celery
 from celery.utils.log import get_task_logger
 from celery.schedules import crontab
+import os
 
 # Initialize Celery
 celery_app = Celery('tasks', broker='redis://redis:6379/0')
+
+redis_url = os.environ.get('REDIS_URL')
+if redis_url:
+    # Print the URL (without credentials for security)
+    url_parts = redis_url.split('@')
+    if len(url_parts) > 1:
+        safe_url = 'redis://***:***@' + url_parts[1]
+    else:
+        safe_url = 'redis://***:***@[hidden]'
+    print(f"Using Redis URL: {safe_url}")
+    
+    # Explicitly set Celery environment variables
+    os.environ['CELERY_BROKER_URL'] = redis_url
+    os.environ['CELERY_RESULT_BACKEND'] = redis_url
+else:
+    print("WARNING: No Redis URL found in environment!")
 
 # Configure Celery
 celery_app.conf.update(

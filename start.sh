@@ -12,6 +12,9 @@ mkdir -p ./data/documents
 mkdir -p ./tmp
 export TMPDIR=$(pwd)/tmp
 
+echo "Starting Celery worker with limited concurrency..."
+celery -A tasks worker -Q document_processing,analysis --loglevel=info --concurrency=2
+
 # Create health check file for web service
 mkdir -p app/static
 echo "Healthy" > app/static/health.txt
