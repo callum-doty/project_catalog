@@ -1,26 +1,43 @@
 #!/bin/bash
-# Create temp directory
-mkdir -p ./tmp
-export TMPDIR=$(pwd)/tmp
-# start.sh - Script to start the application on Railway
+# start.sh - Script that detects which service to start
 
 set -e  # Exit immediately if a command exits with a non-zero status
 
-# Print environment info for debugging (excluding secrets)
+# Print environment info for debugging
 echo "Starting application with Python $(python --version)"
 echo "Current directory: $(pwd)"
 
 # Create necessary directories
 mkdir -p ./data/documents
+mkdir -p ./tmp
+export TMPDIR=$(pwd)/tmp
 
-# Create simple healthy response for healthcheck
+# Create health check file for web service
 mkdir -p app/static
 echo "Healthy" > app/static/health.txt
 
-# Check if the database is available and run migrations
-echo "Running database migrations..."
-python -m flask db upgrade || echo "Warning: Migrations failed, continuing anyway"
+# Detect which service to start based on an environment variable
+SERVICE_TYPE=${SERVICE_TYPE:-"web"}
+echo "Starting service type: $SERVICE_TYPE"
 
-# Start the application with gunicorn
-echo "Starting gunicorn on PORT ${PORT:-5000}..."
-exec gunicorn --bind "0.0.0.0:${PORT:-5000}" wsgi:application
+case $SERVICE_TYPE in
+  "web")
+    echo "Starting web service..."
+    # Try to run migrations (but continue if they fail)
+    python -m flask db upgrade || echo "Warning: Migrations failed, continuing anyway"
+    # Start the web server
+    gunicorn --workers=1 --bind "0.0.0.0:${PORT}" wsgi:application
+    ;;
+  "worker")
+    echo "Starting Celery worker..."
+    celery -A tasks worker -Q document_processing,analysis --loglevel=info
+    ;;
+  "beat")
+    echo "Starting Celery beat..."
+    celery -A tasks beat --loglevel=info
+    ;;
+  *)
+    echo "Unknown service type: $SERVICE_TYPE"
+    exit 1
+    ;;
+esac
