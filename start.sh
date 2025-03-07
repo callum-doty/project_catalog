@@ -1,46 +1,62 @@
 #!/bin/bash
-# start.sh - Script that detects which service to start
+# Improved start script for Railway deployment
 
-set -e  # Exit immediately if a command exits with a non-zero status
-
-# Print environment info for debugging
-echo "Starting application with Python $(python --version)"
+# Print diagnostic information
+echo "Starting service with environment: SERVICE_TYPE=${SERVICE_TYPE}"
 echo "Current directory: $(pwd)"
+echo "Python version: $(python --version)"
+
+# Make sure REDIS_URL is properly referenced
+if [ -n "$REDIS_URL" ]; then
+  echo "Redis URL is set"
+  # Sanitize the URL before printing (for security)
+  SAFE_URL=$(echo $REDIS_URL | sed 's/redis:\/\/[^@]*@/redis:\/\/****:****@/')
+  echo "Using Redis URL: $SAFE_URL"
+else
+  echo "WARNING: REDIS_URL is not set!"
+fi
 
 # Create necessary directories
 mkdir -p ./data/documents
 mkdir -p ./tmp
 export TMPDIR=$(pwd)/tmp
 
-echo "Starting Celery worker with limited concurrency..."
-celery -A tasks worker -Q document_processing,analysis --loglevel=info --concurrency=2
+# Create health check endpoint for Railway
+mkdir -p ./app/static
+echo "OK" > ./app/static/health.txt
 
-# Create health check file for web service
-mkdir -p app/static
-echo "Healthy" > app/static/health.txt
-
-# Detect which service to start based on an environment variable
+# Set the default service type if not specified
 SERVICE_TYPE=${SERVICE_TYPE:-"web"}
-echo "Starting service type: $SERVICE_TYPE"
 
+# Handle service based on type
 case $SERVICE_TYPE in
   "web")
     echo "Starting web service..."
-    # Try to run migrations (but continue if they fail)
-    python -m flask db upgrade || echo "Warning: Migrations failed, continuing anyway"
-    # Start the web server
-    gunicorn --workers=1 --bind "0.0.0.0:${PORT}" wsgi:application
+    
+    # Try to run database migrations
+    python -m flask db upgrade || echo "WARNING: Database migrations failed"
+    
+    # Start the Flask application
+    gunicorn --bind "0.0.0.0:${PORT:-5000}" --workers=1 --timeout=120 wsgi:application
     ;;
+    
   "worker")
     echo "Starting Celery worker..."
-    celery -A tasks worker -Q document_processing,analysis --loglevel=info
+    
+    # Start with very limited concurrency to prevent memory issues
+    celery -A tasks worker -Q document_processing,analysis --loglevel=info --concurrency=2
     ;;
+    
   "beat")
     echo "Starting Celery beat..."
-    celery -A tasks beat --loglevel=info
+    
+    # Start the beat scheduler with a smaller interval
+    celery -A tasks beat --loglevel=info --max-interval=60
     ;;
+    
   *)
-    echo "Unknown service type: $SERVICE_TYPE"
+    echo "ERROR: Unknown service type '${SERVICE_TYPE}'"
+    echo "Valid values are: web, worker, beat"
     exit 1
     ;;
 esac
