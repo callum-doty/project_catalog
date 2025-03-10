@@ -40,11 +40,19 @@ class DocumentProcessor(Task):
             logger.error(f"Error downloading file: {str(e)}")
             return None
 
-@celery_app.task(bind=True)
+
+@celery_app.task(name='tasks.list_tasks')
+def list_tasks():
+    """List all registered tasks"""
+    logger.info("Listing all registered Celery tasks:")
+    for task_name in sorted(celery_app.tasks.keys()):
+        logger.info(f"- {task_name}")
+    return list(celery_app.tasks.keys())
+
+@celery_app.task(bind=True, name='tasks.test_document_processing')
 def test_document_processing(self, document_id):
     """Simplified document processing to test Celery execution"""
-    logger.info(f"=== TESTING DOCUMENT PROCESSING ===")
-    logger.info(f"Task ID: {self.request.id}")
+    logger.info(f"=== TESTING DOCUMENT PROCESSING === Task ID: {self.request.id}")
     logger.info(f"Document ID: {document_id}")
     
     try:

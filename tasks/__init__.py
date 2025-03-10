@@ -12,10 +12,10 @@ from .utils import TASK_STATUSES, handle_task_failure, logger
 
 # Import task modules
 try:
-    from .document_tasks import process_document
+    from .document_tasks import process_document, test_document_processing
+    __all__ = ['celery_app', 'process_document', 'test_document_processing']
 except ImportError as e:
     print(f"Warning: Failed to import document_tasks: {str(e)}")
-    process_document = None
 
 try:
     from .dropbox_tasks import sync_dropbox

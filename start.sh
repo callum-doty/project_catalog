@@ -1,29 +1,17 @@
 #!/bin/bash
-# Improved start script for Railway deployment
+# start.sh - Script to start the application on Railway
 
-# Print diagnostic information
+set -e  # Exit immediately if a command exits with a non-zero status
+
+# Print environment info for debugging
 echo "Starting service with environment: SERVICE_TYPE=${SERVICE_TYPE}"
 echo "Current directory: $(pwd)"
 echo "Python version: $(python --version)"
-
-# Make sure REDIS_URL is properly referenced
-if [ -n "$REDIS_URL" ]; then
-  echo "Redis URL is set"
-  # Sanitize the URL before printing (for security)
-  SAFE_URL=$(echo $REDIS_URL | sed 's/redis:\/\/[^@]*@/redis:\/\/****:****@/')
-  echo "Using Redis URL: $SAFE_URL"
-else
-  echo "WARNING: REDIS_URL is not set!"
-fi
 
 # Create necessary directories
 mkdir -p ./data/documents
 mkdir -p ./tmp
 export TMPDIR=$(pwd)/tmp
-
-# Create health check endpoint for Railway
-mkdir -p ./app/static
-echo "OK" > ./app/static/health.txt
 
 # Set the default service type if not specified
 SERVICE_TYPE=${SERVICE_TYPE:-"web"}
@@ -42,6 +30,10 @@ case $SERVICE_TYPE in
     
   "worker")
     echo "Starting Celery worker..."
+    
+    # List available tasks (for debugging)
+    echo "Listing available tasks..."
+    python -c "from celery import Celery; app = Celery('tasks'); app.autodiscover_tasks(['tasks'], force=True); print('Available tasks:', list(app.tasks.keys()))"
     
     # Start with very limited concurrency to prevent memory issues
     celery -A tasks worker -Q document_processing,analysis --loglevel=info --concurrency=2

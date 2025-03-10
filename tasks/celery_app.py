@@ -49,8 +49,8 @@ TASK_STATUSES = {
 # Configure task routing
 celery_app.conf.task_routes = {
     'tasks.process_document': {'queue': 'document_processing'},
+    'tasks.test_document_processing': {'queue': 'document_processing'},
     'tasks.analyze_document': {'queue': 'analysis'},
-    'tasks.sync_dropbox': {'queue': 'document_processing'},
 }
 
 # Error handling decorator
