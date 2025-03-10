@@ -85,7 +85,6 @@ def index():
 
 @main_routes.route('/upload', methods=['POST'])
 def upload_file():
-    task = test_document_processing.delay(document.id)
     if 'file' not in request.files:
         flash('No file part', 'error')
         return redirect(url_for('main_routes.index'))
@@ -100,6 +99,7 @@ def upload_file():
         temp_path = os.path.join('/tmp', filename)
         file.save(temp_path)
         
+        # Create document record FIRST
         document = Document(
             filename=filename,
             upload_date=datetime.utcnow(),
@@ -109,22 +109,20 @@ def upload_file():
         )
         db.session.add(document)
         db.session.commit()
-
-        # In the upload_file route
+        
+        # Now we have a document.id to use
         minio_path = storage.upload_file(temp_path, filename)
         current_app.logger.info(f"Successfully uploaded {filename} to MinIO at {minio_path}")
 
+        # Use the test task
         try:
             current_app.logger.info(f"Queuing document {document.id} for processing")
-            task = process_document.delay(filename, minio_path, document.id)
+            from tasks.document_tasks import test_document_processing
+            task = test_document_processing.delay(document.id)
             current_app.logger.info(f"Task queued with ID: {task.id}")
         except Exception as e:
             current_app.logger.error(f"Failed to queue document for processing: {str(e)}")
-        
-        # Get process_document task
-        process_document = get_celery_task('process_document')
-        process_document.delay(filename, minio_path, document.id)
-        
+            # Even if processing queue fails, we'll still return success for file upload
         
         os.remove(temp_path)
         flash('File uploaded successfully', 'success')
