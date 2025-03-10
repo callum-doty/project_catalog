@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.sql.expression import text
 import statistics
 from statistics import mean
+from tasks.document_tasks import test_document_processing
 
 main_routes = Blueprint('main_routes', __name__)
 storage = MinIOStorage()
@@ -84,6 +85,7 @@ def index():
 
 @main_routes.route('/upload', methods=['POST'])
 def upload_file():
+    task = test_document_processing.delay(document.id)
     if 'file' not in request.files:
         flash('No file part', 'error')
         return redirect(url_for('main_routes.index'))
@@ -108,7 +110,16 @@ def upload_file():
         db.session.add(document)
         db.session.commit()
 
+        # In the upload_file route
         minio_path = storage.upload_file(temp_path, filename)
+        current_app.logger.info(f"Successfully uploaded {filename} to MinIO at {minio_path}")
+
+        try:
+            current_app.logger.info(f"Queuing document {document.id} for processing")
+            task = process_document.delay(filename, minio_path, document.id)
+            current_app.logger.info(f"Task queued with ID: {task.id}")
+        except Exception as e:
+            current_app.logger.error(f"Failed to queue document for processing: {str(e)}")
         
         # Get process_document task
         process_document = get_celery_task('process_document')

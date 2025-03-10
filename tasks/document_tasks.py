@@ -40,9 +40,47 @@ class DocumentProcessor(Task):
             logger.error(f"Error downloading file: {str(e)}")
             return None
 
+@celery_app.task(bind=True)
+def test_document_processing(self, document_id):
+    """Simplified document processing to test Celery execution"""
+    logger.info(f"=== TESTING DOCUMENT PROCESSING ===")
+    logger.info(f"Task ID: {self.request.id}")
+    logger.info(f"Document ID: {document_id}")
+    
+    try:
+        # Import Flask app
+        from app import create_app
+        app = create_app()
+        
+        with app.app_context():
+            # Update document status
+            from app.models.models import Document
+            from tasks.celery_app import TASK_STATUSES
+            from app.extensions import db
+            
+            doc = Document.query.get(document_id)
+            if doc:
+                logger.info(f"Found document: {doc.filename}")
+                doc.status = TASK_STATUSES['COMPLETED']
+                db.session.commit()
+                logger.info("Document status updated to COMPLETED")
+                return True
+            else:
+                logger.error(f"Document with ID {document_id} not found")
+                return False
+    except Exception as e:
+        logger.error(f"Error in test processing: {str(e)}", exc_info=True)
+        raise
+
+
 @celery_app.task(bind=True, base=DocumentProcessor)
 @handle_task_failure
-def process_document(self, filename: str, minio_path: str, document_id: int):
+def process_document(self, filename, minio_path, document_id):
+    logger.info(f"=== STARTING DOCUMENT PROCESSING ===")
+    logger.info(f"Task ID: {self.request.id}")
+    logger.info(f"Processing document: {filename}")
+    logger.info(f"MinIO path: {minio_path}")
+    logger.info(f"Document ID: {document_id}")
     """Process document through the pipeline and track processing time"""
     # Import Flask app here to avoid circular imports
     from app import create_app
