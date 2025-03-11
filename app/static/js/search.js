@@ -1,5 +1,29 @@
 // static/js/search.js
 
+document.addEventListener('DOMContentLoaded', function() {
+    // Handle missing previews gracefully
+    const previewImages = document.querySelectorAll('.preview-image');
+    previewImages.forEach(img => {
+        img.onerror = function() {
+            // Replace with a generic document icon
+            this.src = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzY2NiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik0xNCAySDZhMiAyIDAgMCAwLTIgMnYxNmEyIDIgMCAwIDAgMiAyaDEyYTIgMiAwIDAgMCAyLTJWOHoiPjwvcGF0aD48cG9seWxpbmUgcG9pbnRzPSIxNCAyIDE0IDggMjAgOCI+PC9wb2x5bGluZT48L3N2Zz4=";
+            this.classList.add('fallback-icon');
+        };
+    });
+    
+    // Prevent excessive preview loading
+    let debounceTimer;
+    const previewContainer = document.querySelector('#resultsGrid');
+    if (previewContainer) {
+        const originalUpdateResults = window.updateResults;
+        window.updateResults = function(results) {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                originalUpdateResults(results);
+            }, 300);
+        };
+    }
+});
 document.getElementById('searchForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     const query = new FormData(this).get('q');
