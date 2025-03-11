@@ -17,7 +17,8 @@ from datetime import datetime, timedelta
 from sqlalchemy.sql.expression import text
 import statistics
 from statistics import mean
-from tasks.document_tasks import test_document_processing
+from tasks.document_tasks import process_document
+
 
 main_routes = Blueprint('main_routes', __name__)
 storage = MinIOStorage()
@@ -28,7 +29,6 @@ MAX_SEARCH_TIMES = 100
 def get_celery_task(task_name):
     """Lazy import of celery tasks to avoid circular imports"""
     if task_name == 'process_document':
-        from tasks.document_tasks import process_document
         return process_document
     elif task_name == 'sync_dropbox':
         from tasks.dropbox_tasks import sync_dropbox
@@ -83,6 +83,7 @@ def index():
         current_app.logger.error(f"Error fetching documents: {str(e)}")
         return render_template('pages/index.html', documents=[])
 
+
 @main_routes.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
@@ -114,11 +115,11 @@ def upload_file():
         minio_path = storage.upload_file(temp_path, filename)
         current_app.logger.info(f"Successfully uploaded {filename} to MinIO at {minio_path}")
 
-        # Use the test task
+        # Use the full process_document task instead of test_document_processing
         try:
             current_app.logger.info(f"Queuing document {document.id} for processing")
-            from tasks.document_tasks import test_document_processing
-            task = test_document_processing.delay(document.id)
+            from tasks.document_tasks import process_document
+            task = process_document.delay(filename, minio_path, document.id)
             current_app.logger.info(f"Task queued with ID: {task.id}")
         except Exception as e:
             current_app.logger.error(f"Failed to queue document for processing: {str(e)}")

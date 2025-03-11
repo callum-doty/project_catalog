@@ -81,83 +81,62 @@ def test_document_processing(self, document_id):
         raise
 
 
-@celery_app.task(bind=True, base=DocumentProcessor)
-@handle_task_failure
+@celery_app.task(bind=True, name='tasks.process_document')
 def process_document(self, filename, minio_path, document_id):
+    """Process document through the pipeline"""
     logger.info(f"=== STARTING DOCUMENT PROCESSING ===")
     logger.info(f"Task ID: {self.request.id}")
     logger.info(f"Processing document: {filename}")
     logger.info(f"MinIO path: {minio_path}")
     logger.info(f"Document ID: {document_id}")
-    """Process document through the pipeline and track processing time"""
-    # Import Flask app here to avoid circular imports
+    
+    # Import Flask app here to avoid circular import
     from app import create_app
     app = create_app()
     
     with app.app_context():
-        from app.models.models import Document, LLMAnalysis, ExtractedText
-        from app.extensions import db
-        
         doc = Document.query.get(document_id)
+        if not doc:
+            logger.error(f"Document with ID {document_id} not found")
+            return False
+            
         doc.status = TASK_STATUSES['PROCESSING']
         db.session.commit()
-
-        # Start timing the processing
-        start_time = time.time()
-
+        logger.info(f"Updated document status to PROCESSING")
+        
         try:
             logger.info(f"Starting analysis for document: {filename}")
             
-            # Download the file for potential image analysis
-            temp_path = None
-            image_path = None
-            
-            if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
-                # If it's an image file, use it directly for image analysis
-                image_path = self.download_temp_file(filename)
-            elif filename.lower().endswith('.pdf'):
-                # For PDFs, download for potential text extraction
-                temp_path = self.download_temp_file(filename)
-                # You could extract the first page as an image here if needed
-            
             # Initialize LLM service and analyze
-            try:
-                # Include image path if available
-                if image_path:
-                    response = self.llm_service.analyze_document(filename, image_path=image_path)
-                else:
-                    response = self.llm_service.analyze_document(filename)
-                
-                # Store results
-                store_analysis_results(document_id, response)
-                
-                # Calculate processing time
-                processing_time = time.time() - start_time
-                
-                # Update document with processing time and complete status
-                doc.processing_time = processing_time
-                doc.status = TASK_STATUSES['COMPLETED']
-                db.session.commit()
-                
-                logger.info(f"Analysis completed successfully in {processing_time:.2f} seconds")
-                
-            finally:
-                # Clean up temporary files
-                if temp_path and os.path.exists(temp_path):
-                    os.remove(temp_path)
-                if image_path and os.path.exists(image_path) and image_path != temp_path:
-                    os.remove(image_path)
+            from app.services.llm_service import LLMService
+            llm_service = LLMService()
+            
+            logger.info(f"Calling Claude API for document analysis")
+            response = llm_service.analyze_document(filename)
+            
+            # Log the raw LLM response for debugging
+            logger.info(f"Received LLM response, parsing results...")
 
+            store_analysis_results(document_id, response)
+            
+            # Parse results
+            from app.services.llm_parser import LLMResponseParser
+            parser = LLMResponseParser()
+            
+            # Store LLM Analysis and related data
+            # (Your existing code for storing analysis results)
+            
+            # Update status and commit
+            doc.status = TASK_STATUSES['COMPLETED']
+            db.session.commit()
+            logger.info(f"Analysis completed successfully")
+            
             return True
-
+            
         except Exception as e:
-            # Still record the processing time even for failures
-            processing_time = time.time() - start_time
-            doc.processing_time = processing_time
+            logger.error(f"Document processing failed: {str(e)}", exc_info=True)
             doc.status = TASK_STATUSES['FAILED']
             db.session.commit()
-            
-            logger.error(f"Document processing failed after {processing_time:.2f} seconds: {str(e)}", exc_info=True)
             raise
 
 def store_analysis_results(document_id: int, response: dict):
