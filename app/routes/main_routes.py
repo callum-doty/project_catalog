@@ -521,7 +521,7 @@ def recovery_dashboard():
             })
         
         return render_template(
-            'recovery.html',
+            'pages/recovery.html',
             total_docs=total_docs,
             status_counts=status_counts,
             failed_docs=formatted_failed_docs
@@ -614,7 +614,7 @@ def recover_pending_documents():
     pending_docs = Document.query.filter_by(status='PENDING').all()
     
     return render_template(
-        'recover_pending.html', 
+        'pages/recover_pending.html', 
         documents=pending_docs,
         count=len(pending_docs)
     )
