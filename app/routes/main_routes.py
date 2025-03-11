@@ -18,6 +18,8 @@ from sqlalchemy.sql.expression import text
 import statistics
 from statistics import mean
 from tasks.document_tasks import process_document
+from tasks.dropbox_tasks import sync_dropbox
+
 
 
 main_routes = Blueprint('main_routes', __name__)
@@ -221,6 +223,68 @@ def trigger_dropbox_sync():  # Renamed function to avoid conflict
             'message': str(e)
         }), 500
 
+
+
+@main_routes.route('/api/trigger-sync', methods=['POST'])
+def trigger_sync():
+    """Manually trigger a Dropbox sync"""
+    try:
+        current_app.logger.info("Manually triggering Dropbox sync")
+        
+        # Debug environment variables
+        dropbox_token = os.getenv('DROPBOX_ACCESS_TOKEN', 'NOT_SET')
+        dropbox_folder = os.getenv('DROPBOX_FOLDER_PATH', '')
+        
+        current_app.logger.info(f"DROPBOX_ACCESS_TOKEN exists: {'Yes' if dropbox_token != 'NOT_SET' else 'No'}")
+        current_app.logger.info(f"DROPBOX_FOLDER_PATH value: '{dropbox_folder}'")
+        
+        # Test connection first
+        try:
+            dropbox_service = DropboxService()
+            status = dropbox_service.test_connection()
+            current_app.logger.info(f"Dropbox connection test result: {status}")
+            
+            if not status.get('connected', False):
+                return jsonify({
+                    'status': 'error',
+                    'message': f"Dropbox connection failed: {status.get('error', 'Unknown error')}"
+                }), 500
+                
+            # List root folder contents to debug
+            root_contents = dropbox_service.dbx.files_list_folder("")
+            current_app.logger.info(f"Root folder has {len(root_contents.entries)} entries")
+            
+            # Log the first few entries to check what's there
+            for idx, entry in enumerate(root_contents.entries[:5]):
+                if hasattr(entry, 'name'):
+                    current_app.logger.info(f"Root entry {idx}: {entry.name} (Type: {type(entry).__name__})")
+        
+        except Exception as e:
+            current_app.logger.error(f"Error testing Dropbox connection: {str(e)}")
+            return jsonify({
+                'status': 'error',
+                'message': f"Dropbox connection failed: {str(e)}"
+            }), 500
+        
+        # Trigger sync task
+        result = sync_dropbox.delay()
+        current_app.logger.info(f"Sync task triggered with ID: {result.id}")
+        
+        # Return information for debugging
+        return jsonify({
+            'status': 'success',
+            'message': 'Sync task triggered',
+            'task_id': result.id,
+            'connection_info': status
+        })
+    except Exception as e:
+        current_app.logger.error(f"Error triggering sync: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
 @main_routes.after_request
 def add_csrf_token(response):
     """Add CSRF token to response for AJAX requests"""
@@ -228,14 +292,100 @@ def add_csrf_token(response):
         response.set_cookie('csrf_token', generate_csrf())
     return response
 
+
+
 @main_routes.route('/api/sync-status')
 @csrf.exempt
 def get_sync_status():
     """Get Dropbox sync status"""
     try:
+        current_app.logger.info("Getting Dropbox sync status")
+        
+        # Debug environment variables
+        dropbox_token = os.getenv('DROPBOX_ACCESS_TOKEN', 'NOT_SET')
+        dropbox_folder = os.getenv('DROPBOX_FOLDER_PATH', '')
+        
+        current_app.logger.info(f"DROPBOX_ACCESS_TOKEN exists: {'Yes' if dropbox_token != 'NOT_SET' else 'No'}")
+        current_app.logger.info(f"DROPBOX_FOLDER_PATH value: '{dropbox_folder}'")
+        
         dropbox_service = DropboxService()
-        status = dropbox_service.get_sync_status()
-        return jsonify(status)
+        connection_test = dropbox_service.test_connection()
+        
+        # Get most recent successful sync
+        last_sync = DropboxSync.query.order_by(DropboxSync.sync_date.desc()).first()
+        
+        # Get count of files synced in last 24 hours
+        yesterday = datetime.utcnow() - timedelta(days=1)
+        recent_syncs = DropboxSync.query.filter(DropboxSync.sync_date >= yesterday).count()
+        
+        # Get list of files in Dropbox to check what should be synced
+        try:
+            if connection_test.get('connected', False):
+                # Try to list files
+                all_files = []
+                folder_path = dropbox_service.folder_path
+                
+                result = dropbox_service.dbx.files_list_folder(
+                    folder_path,
+                    recursive=True
+                )
+                
+                # Count supported files
+                supported_count = 0
+                for entry in result.entries:
+                    if hasattr(entry, 'path_lower'):
+                        path_lower = entry.path_lower
+                        if (path_lower.endswith('.pdf') or path_lower.endswith('.jpg') or 
+                            path_lower.endswith('.jpeg') or path_lower.endswith('.png')):
+                            supported_count += 1
+                            if len(all_files) < 5:  # Just list a few for debugging
+                                all_files.append(path_lower)
+                
+                current_app.logger.info(f"Found {supported_count} supported files in Dropbox")
+                
+                # Count next batch to process
+                processed_files = {sync.dropbox_file_id for sync in DropboxSync.query.all()}
+                to_process = 0
+                
+                for entry in result.entries:
+                    if hasattr(entry, 'id') and hasattr(entry, 'path_lower'):
+                        if entry.id not in processed_files:
+                            path_lower = entry.path_lower
+                            if (path_lower.endswith('.pdf') or path_lower.endswith('.jpg') or 
+                                path_lower.endswith('.jpeg') or path_lower.endswith('.png')):
+                                to_process += 1
+                
+                current_app.logger.info(f"Found {to_process} files to process in next sync")
+                
+                status_response = {
+                    'last_sync_time': last_sync.sync_date.isoformat() if last_sync else None,
+                    'last_24h_files': recent_syncs,
+                    'last_status': 'SUCCESS' if recent_syncs > 0 else 'NO_ACTIVITY',
+                    'dropbox_connected': connection_test.get('connected', False),
+                    'files_in_dropbox': supported_count,
+                    'files_to_process': to_process,
+                    'connection_info': connection_test,
+                    'sample_files': all_files
+                }
+            else:
+                status_response = {
+                    'last_sync_time': last_sync.sync_date.isoformat() if last_sync else None,
+                    'last_24h_files': recent_syncs,
+                    'last_status': 'CONNECTION_ERROR',
+                    'dropbox_connected': False,
+                    'connection_info': connection_test
+                }
+        except Exception as e:
+            current_app.logger.error(f"Error getting Dropbox file list: {str(e)}")
+            status_response = {
+                'last_sync_time': last_sync.sync_date.isoformat() if last_sync else None,
+                'last_24h_files': recent_syncs,
+                'last_status': 'ERROR',
+                'dropbox_connected': connection_test.get('connected', False),
+                'error': str(e)
+            }
+            
+        return jsonify(status_response)
     except Exception as e:
         current_app.logger.error(f"Error getting sync status: {str(e)}")
         return jsonify({
@@ -243,7 +393,8 @@ def get_sync_status():
             'last_sync_time': None,
             'last_24h_files': 0,
             'last_status': 'ERROR',
-            'dropbox_connected': False
+            'dropbox_connected': False,
+            'error_details': str(e)
         })
 
 
