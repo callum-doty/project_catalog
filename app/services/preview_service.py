@@ -25,26 +25,36 @@ class PreviewService:
         return f"preview:{hashlib.md5(filename.encode()).hexdigest()}"
         
     def get_preview(self, filename):
-        """Generate preview with caching"""
-        cache_key = self._get_cache_key(filename)
-        
-        # Try to get from cache
-        cached_preview = self.redis_client.get(cache_key)
-        if cached_preview:
-            return pickle.loads(cached_preview)
+        """Generate preview for different file types"""
+        try:
+            logger.info(f"Generating preview for {filename}")
             
-        # Generate preview
-        preview = self._generate_preview(filename)
-        
-        # Cache the result
-        if preview:
-            self.redis_client.setex(
-                cache_key,
-                self.cache_ttl,
-                pickle.dumps(preview)
-            )
+            # Use MinIOStorage to get the file data
+            from app.services.storage_service import MinIOStorage
+            storage = MinIOStorage()
             
-        return preview
+            try:
+                file_data = storage.get_file(filename)
+                if not file_data:
+                    logger.error(f"No file data received for {filename}")
+                    return None
+            except Exception as e:
+                logger.error(f"Error retrieving file from storage: {str(e)}")
+                return None
+                
+            file_ext = os.path.splitext(filename)[1].lower()
+            
+            if file_ext in self.supported_images:
+                return self._generate_image_preview(file_data)
+            elif file_ext in self.supported_pdfs:
+                return self._generate_pdf_preview(file_data)
+            else:
+                logger.warning(f"Unsupported file type: {file_ext}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Preview generation error for {filename}: {str(e)}")
+            return None
         
     def _generate_preview(self, filename):
         """Generate preview for different file types"""
