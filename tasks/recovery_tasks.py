@@ -1,101 +1,153 @@
 # tasks/recovery_tasks.py
 
-import time
-from celery import shared_task
-from celery.utils.log import get_task_logger
+from .celery_app import celery_app, logger, TASK_STATUSES
+from app.models.models import Document, LLMAnalysis, DesignElement, Classification, ExtractedText, LLMKeyword
 from app.extensions import db
-from app.models.models import Document
-from app import create_app
-from .document_tasks import process_document
-from .utils import TASK_STATUSES
-from .celery_app import celery_app
+from app.services.llm_service import LLMService
+from app.services.llm_parser import LLMResponseParser
+from app.services.storage_service import MinIOStorage
+from datetime import datetime
+import json
 
-logger = get_task_logger(__name__)
-
-@celery_app.task(name='tasks.reprocess_failed_documents')
-def reprocess_failed_documents(delay_seconds=10, batch_size=5):
-    """
-    Reprocess documents that previously failed.
+@celery_app.task(name='tasks.reprocess_document', bind=True)
+def reprocess_document(self, filename: str, minio_path: str, document_id: int):
+    """Reprocess a failed or stuck document"""
+    logger.info(f"Starting reprocessing for document: {filename} (ID: {document_id})")
     
-    Args:
-        delay_seconds: Seconds to wait between processing each document to avoid rate limits
-        batch_size: Number of documents to process in this run
-    """
-    app = create_app()
-    
-    with app.app_context():
-        # Find documents with FAILED status
-        failed_docs = Document.query.filter_by(status=TASK_STATUSES['FAILED']).limit(batch_size).all()
-        
-        if not failed_docs:
-            logger.info("No failed documents found to reprocess")
-            return "No failed documents found"
-            
-        logger.info(f"Found {len(failed_docs)} failed documents to reprocess")
-        
-        success_count = 0
-        for doc in failed_docs:
-            try:
-                logger.info(f"Reprocessing document {doc.id}: {doc.filename}")
-                
-                # Update status to PENDING
-                doc.status = TASK_STATUSES['PENDING']
-                db.session.commit()
-                
-                # Construct the MinIO path
-                minio_path = f"documents/{doc.filename}"
-                
-                # Schedule the document for processing
-                process_document.delay(doc.filename, minio_path, doc.id)
-                
-                success_count += 1
-                
-                # Wait between documents to avoid rate limits
-                if delay_seconds > 0 and success_count < len(failed_docs):
-                    logger.info(f"Waiting {delay_seconds} seconds before next document...")
-                    time.sleep(delay_seconds)
-                    
-            except Exception as e:
-                logger.error(f"Error reprocessing document {doc.id}: {str(e)}")
-                doc.status = TASK_STATUSES['FAILED']
-                db.session.commit()
-        
-        return f"Reprocessed {success_count} out of {len(failed_docs)} failed documents"
-
-@celery_app.task(name='tasks.reprocess_specific_document')
-def reprocess_specific_document(document_id):
-    """
-    Reprocess a specific document by ID
-    
-    Args:
-        document_id: The ID of the document to reprocess
-    """
+    # Import Flask app here to avoid circular import
+    from app import create_app
     app = create_app()
     
     with app.app_context():
         doc = Document.query.get(document_id)
         
         if not doc:
-            logger.error(f"Document with ID {document_id} not found")
-            return f"Document with ID {document_id} not found"
+            logger.error(f"Document not found: {document_id}")
+            return False
             
+        doc.status = TASK_STATUSES['PROCESSING']
+        db.session.commit()
+        
+        # Remove any existing analysis data
         try:
-            logger.info(f"Reprocessing document {doc.id}: {doc.filename}")
+            # Delete associated records in other tables
+            LLMKeyword.query.join(LLMAnalysis).filter(LLMAnalysis.document_id == document_id).delete(synchronize_session=False)
+            LLMAnalysis.query.filter_by(document_id=document_id).delete()
+            DesignElement.query.filter_by(document_id=document_id).delete()
+            Classification.query.filter_by(document_id=document_id).delete()
+            ExtractedText.query.filter_by(document_id=document_id).delete()
             
-            # Update status to PENDING
-            doc.status = TASK_STATUSES['PENDING']
             db.session.commit()
-            
-            # Construct the MinIO path
-            minio_path = f"documents/{doc.filename}"
-            
-            # Schedule the document for processing
-            process_document.delay(doc.filename, minio_path, doc.id)
-            
-            return f"Document {document_id} ({doc.filename}) reprocessing started"
-                
+            logger.info(f"Cleared previous analysis data for document: {document_id}")
         except Exception as e:
-            logger.error(f"Error reprocessing document {doc.id}: {str(e)}")
+            logger.error(f"Error clearing previous analysis: {str(e)}")
+            db.session.rollback()
+
+        try:
+            logger.info(f"Starting analysis for document: {filename}")
+            
+            # Initialize LLM service and analyze
+            llm_service = LLMService()
+            response = llm_service.analyze_document(filename)
+            
+            # Log the raw LLM response for debugging
+            logger.info(f"Raw LLM response for {filename}: {json.dumps(response)}")
+            
+            logger.info(f"Received LLM response, parsing results...")
+            
+            # Parse results
+            parser = LLMResponseParser()
+            
+            # Store LLM Analysis
+            try:
+                llm_analysis_data = parser.parse_llm_analysis(response)
+                llm_analysis = LLMAnalysis(
+                    document_id=document_id,
+                    **llm_analysis_data
+                )
+                db.session.add(llm_analysis)
+                db.session.flush()
+                logger.info(f"Stored LLM analysis")
+            except Exception as e:
+                logger.error(f"Failed to store LLM analysis: {str(e)}")
+                raise
+
+            # Store Design Elements
+            try:
+                design_data = parser.parse_design_elements(response)
+                design_element = DesignElement(
+                    document_id=document_id,
+                    **design_data
+                )
+                db.session.add(design_element)
+                logger.info(f"Stored design elements")
+            except Exception as e:
+                logger.error(f"Failed to store design elements: {str(e)}")
+                raise
+
+            # Store Classification
+            try:
+                classification_data = parser.parse_classification(response)
+                classification = Classification(
+                    document_id=document_id,
+                    **classification_data
+                )
+                db.session.add(classification)
+                logger.info(f"Stored classification")
+            except Exception as e:
+                logger.error(f"Failed to store classification: {str(e)}")
+                raise
+
+            # Store Extracted Text
+            try:
+                text_data = response.get('extracted_text', {})
+                main_message = text_data.get('main_message', '')
+                supporting_text = text_data.get('supporting_text', '')
+                
+                # Handle cases where messages might be lists
+                if isinstance(main_message, list):
+                    main_message = ' '.join(str(msg) for msg in main_message)
+                if isinstance(supporting_text, list):
+                    supporting_text = ' '.join(str(msg) for msg in supporting_text)
+                
+                text_entry = ExtractedText(
+                    document_id=document_id,
+                    text_content=f"{main_message}\n\n{supporting_text}",
+                    confidence=float(text_data.get('confidence', 0.9)),
+                    extraction_date=datetime.utcnow()
+                )
+                db.session.add(text_entry)
+                logger.info(f"Stored extracted text")
+            except Exception as e:
+                logger.error(f"Failed to store extracted text: {str(e)}")
+                raise
+
+            # Store Keywords
+            try:
+                keywords_data = parser.parse_keywords(response)
+                if keywords_data:
+                    for keyword_data in keywords_data:
+                        keyword = LLMKeyword(
+                            llm_analysis_id=llm_analysis.id,
+                            **keyword_data
+                        )
+                        db.session.add(keyword)
+                    logger.info(f"Stored {len(keywords_data)} keywords")
+                else:
+                    logger.warning("No keywords found to store")
+            except Exception as e:
+                logger.error(f"Failed to store keywords: {str(e)}")
+                raise
+
+            # Update status and commit
+            doc.status = TASK_STATUSES['COMPLETED']
+            db.session.commit()
+            logger.info(f"Reprocessing completed successfully")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Document reprocessing failed: {str(e)}", exc_info=True)
             doc.status = TASK_STATUSES['FAILED']
             db.session.commit()
-            return f"Error reprocessing document {document_id}: {str(e)}"
+            raise

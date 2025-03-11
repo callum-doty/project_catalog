@@ -1,102 +1,222 @@
-<!-- app/templates/pages/recover_pending.html -->
 {% extends "base.html" %} {% block content %}
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-  <div class="bg-white rounded-lg shadow p-6 mb-6">
-    <h1 class="text-2xl font-bold mb-4">Recover Pending Documents</h1>
-    <p class="mb-4">Found {{ count }} documents stuck in PENDING state</p>
-
-    {% if documents %}
-    <form
-      method="post"
-      action="{{ url_for('main_routes.recover_pending_documents') }}"
-    >
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-
-      <div class="mb-6">
-        <div class="mb-2 font-medium">Actions:</div>
-        <div class="flex space-x-4">
-          <button
-            type="submit"
-            name="action"
-            value="retry"
-            class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-          >
-            Retry Processing
-          </button>
-          <button
-            type="submit"
-            name="action"
-            value="fail"
-            class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700"
-          >
-            Mark as Failed
-          </button>
-          <button
-            type="submit"
-            name="action"
-            value="delete"
-            class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-            onclick="return confirm('Are you sure you want to delete these documents? This cannot be undone.')"
-          >
-            Delete Documents
-          </button>
-        </div>
-      </div>
-
-      <div class="overflow-x-auto">
-        <table class="min-w-full bg-white border">
-          <thead>
-            <tr>
-              <th class="py-2 px-4 border-b border-r">
-                <input type="checkbox" id="select-all" onclick="toggleAll()" />
-              </th>
-              <th class="py-2 px-4 border-b border-r text-left">ID</th>
-              <th class="py-2 px-4 border-b border-r text-left">Filename</th>
-              <th class="py-2 px-4 border-b border-r text-left">Upload Date</th>
-              <th class="py-2 px-4 border-b text-left">File Size</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for doc in documents %}
-            <tr>
-              <td class="py-2 px-4 border-b border-r text-center">
-                <input
-                  type="checkbox"
-                  name="document_ids"
-                  value="{{ doc.id }}"
-                  class="doc-checkbox"
-                />
-              </td>
-              <td class="py-2 px-4 border-b border-r">{{ doc.id }}</td>
-              <td class="py-2 px-4 border-b border-r">{{ doc.filename }}</td>
-              <td class="py-2 px-4 border-b border-r">
-                {{ doc.upload_date.strftime('%Y-%m-%d %H:%M:%S') }}
-              </td>
-              <td class="py-2 px-4 border-b">
-                {% if doc.file_size > 1048576 %} {{ (doc.file_size / 1048576) |
-                round(2) }} MB {% else %} {{ (doc.file_size / 1024) | round(2)
-                }} KB {% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </form>
-
-    <script>
-      function toggleAll() {
-        const selectAll = document.getElementById("select-all");
-        const checkboxes = document.getElementsByClassName("doc-checkbox");
-
-        for (let checkbox of checkboxes) {
-          checkbox.checked = selectAll.checked;
-        }
-      }
-    </script>
-    {% else %}
-    <p>No pending documents found.</p>
-    {% endif %}
+  <div class="mb-8">
+    <h1 class="text-2xl font-bold mb-4">Pending Documents Recovery</h1>
+    <p class="text-gray-600">
+      Documents stuck in processing for more than 1 hour can be reprocessed from
+      this dashboard.
+    </p>
   </div>
+
+  <!-- Results Count -->
+  {% if documents %}
+  <div class="mb-4 text-gray-600">
+    Found {{ documents|length }} stuck document{% if documents|length != 1 %}s{%
+    endif %}
+  </div>
+  {% endif %}
+
+  <!-- Document Grid -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    {% for doc in documents %}
+    <div
+      class="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow document-card"
+      data-doc-id="{{ doc.id }}"
+    >
+      <!-- Preview Section -->
+      <div class="w-full h-48 bg-gray-100 flex items-center justify-center">
+        {% if doc.preview %}
+        <img
+          src="{{ doc.preview }}"
+          alt="Preview of {{ doc.filename }}"
+          class="w-full h-full object-contain"
+        />
+        {% else %}
+        <div class="flex flex-col items-center text-gray-400">
+          <svg
+            class="w-12 h-12 mb-2"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+            ></path>
+          </svg>
+          <span>No preview available</span>
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="p-6">
+        <!-- Document Title -->
+        <h3 class="text-lg font-semibold text-gray-900 mb-2">
+          {{ doc.filename }}
+        </h3>
+
+        <!-- Status Badge - Yellow for pending/processing -->
+        <div class="mb-4">
+          <span
+            class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800"
+          >
+            {{ doc.status }}
+          </span>
+        </div>
+
+        <!-- Upload Date -->
+        <p class="text-sm text-gray-500 mb-2">
+          Uploaded: {{ doc.upload_date }}
+        </p>
+
+        <!-- Time Pending -->
+        <p class="text-sm text-gray-500 mb-4">
+          Stuck for: {{ doc.hours_pending }} hours
+        </p>
+
+        <!-- Recovery Button -->
+        <button
+          class="w-full mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 recover-button"
+          data-doc-id="{{ doc.id }}"
+        >
+          Restart Processing
+        </button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if not documents %}
+  <div class="text-center py-8">
+    <div class="mb-4">
+      <svg
+        class="w-16 h-16 mx-auto text-gray-400"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+        ></path>
+      </svg>
+    </div>
+    <p class="text-gray-500 text-lg">No stuck documents found</p>
+    <p class="text-gray-400 mt-2">All documents are processing normally</p>
+  </div>
+  {% endif %}
 </div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    // Add event listeners to all recover buttons
+    const recoverButtons = document.querySelectorAll(".recover-button");
+
+    recoverButtons.forEach((button) => {
+      button.addEventListener("click", async function (e) {
+        e.preventDefault();
+
+        const docId = this.getAttribute("data-doc-id");
+        this.disabled = true;
+        this.textContent = "Restarting...";
+
+        try {
+          const response = await fetch(`/api/recover-document/${docId}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRFToken": document.querySelector('meta[name="csrf-token"]')
+                .content,
+            },
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            // Start polling for status updates
+            this.textContent = "Processing...";
+            startStatusPolling(docId, this);
+          } else {
+            alert(`Error: ${data.message}`);
+            this.textContent = "Restart Processing";
+            this.disabled = false;
+          }
+        } catch (error) {
+          console.error("Recovery error:", error);
+          alert("Error triggering recovery");
+          this.textContent = "Restart Processing";
+          this.disabled = false;
+        }
+      });
+    });
+
+    function startStatusPolling(docId, button) {
+      const interval = setInterval(async () => {
+        try {
+          const response = await fetch(`/api/recovery-status/${docId}`);
+          const data = await response.json();
+
+          if (response.ok) {
+            const status = data.document_status;
+
+            // Update button text to show status
+            button.textContent = `Status: ${status}`;
+
+            if (status === "COMPLETED") {
+              clearInterval(interval);
+              button.textContent = "Successfully Processed";
+              button.classList.remove("bg-blue-500", "hover:bg-blue-600");
+              button.classList.add("bg-green-500", "hover:bg-green-600");
+
+              // Remove document from list after 3 seconds
+              setTimeout(() => {
+                const docCard = document.querySelector(
+                  `.document-card[data-doc-id="${docId}"]`
+                );
+                if (docCard) {
+                  docCard.classList.add("animate-fade-out");
+                  setTimeout(() => {
+                    docCard.remove();
+
+                    // Check if there are any documents left
+                    if (
+                      document.querySelectorAll(".document-card").length === 0
+                    ) {
+                      location.reload(); // Reload to show "no documents" message
+                    }
+                  }, 500);
+                }
+              }, 3000);
+            } else if (status === "FAILED") {
+              clearInterval(interval);
+              button.textContent = "Processing Failed";
+              button.classList.remove("bg-blue-500", "hover:bg-blue-600");
+              button.classList.add("bg-red-500", "hover:bg-red-600");
+
+              // Re-enable button after 3 seconds
+              setTimeout(() => {
+                button.textContent = "Try Again";
+                button.disabled = false;
+              }, 3000);
+            }
+          }
+        } catch (error) {
+          console.error("Status polling error:", error);
+        }
+      }, 3000); // Check every 3 seconds
+    }
+  });
+</script>
+
+<style>
+  .animate-fade-out {
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: opacity 0.5s, transform 0.5s;
+  }
+</style>
 {% endblock %}

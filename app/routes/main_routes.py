@@ -248,38 +248,6 @@ def get_sync_status():
 
 
 
-@main_routes.route('/api/reprocess-failed', methods=['POST'])
-def reprocess_failed():
-    """API endpoint to reprocess failed documents"""
-    try:
-        from tasks.recovery_tasks import reprocess_failed_documents
-        
-        # Get parameters with defaults
-        delay_seconds = int(request.json.get('delay_seconds', 10))
-        batch_size = int(request.json.get('batch_size', 5))
-        
-        # Validate parameters
-        if delay_seconds < 0:
-            delay_seconds = 0
-        if batch_size < 1:
-            batch_size = 1
-        elif batch_size > 20:
-            batch_size = 20
-            
-        # Start the task
-        task = reprocess_failed_documents.delay(delay_seconds, batch_size)
-        
-        return jsonify({
-            'status': 'success',
-            'message': f'Started reprocessing failed documents (batch size: {batch_size}, delay: {delay_seconds}s)',
-            'task_id': task.id
-        })
-    except Exception as e:
-        current_app.logger.error(f"Error reprocessing failed documents: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
         
 @main_routes.route('/api/reprocess-document/<int:document_id>', methods=['POST'])
 def reprocess_document(document_id):
@@ -495,126 +463,138 @@ def get_search_response_time():
 
 @main_routes.route('/recovery-dashboard')
 def recovery_dashboard():
-    """View to display failed documents and recovery options"""
+    """Display failed documents for recovery"""
     try:
-        # Get counts for different statuses
-        from app.models.models import Document
-        from tasks.utils import TASK_STATUSES
+        # Get all documents with FAILED status
+        failed_documents = Document.query.filter_by(status='FAILED').order_by(Document.upload_date.desc()).all()
         
-        status_counts = {}
-        total_docs = Document.query.count()
+        # Prepare data for template
+        documents_data = []
         
-        for status_name, status_value in TASK_STATUSES.items():
-            count = Document.query.filter_by(status=status_value).count()
-            status_counts[status_name] = count
-        
-        # Get the most recent failed documents
-        failed_docs = Document.query.filter_by(status='FAILED').order_by(Document.upload_date.desc()).limit(10).all()
-        
-        formatted_failed_docs = []
-        for doc in failed_docs:
-            formatted_failed_docs.append({
+        for doc in failed_documents:
+            preview = None
+            try:
+                preview = preview_service.get_preview(doc.filename)
+            except Exception as e:
+                current_app.logger.error(f"Preview generation failed for {doc.filename}: {str(e)}")
+            
+            documents_data.append({
                 'id': doc.id,
                 'filename': doc.filename,
                 'upload_date': doc.upload_date.strftime('%Y-%m-%d %H:%M:%S'),
-                'file_size': doc.file_size
+                'file_size': f"{(doc.file_size/1024):.2f} KB",
+                'preview': preview,
+                'status': doc.status
             })
         
-        return render_template(
-            'pages/recovery.html',
-            total_docs=total_docs,
-            status_counts=status_counts,
-            failed_docs=formatted_failed_docs
-        )
+        return render_template('pages/recovery.html', documents=documents_data)
+        
     except Exception as e:
-        current_app.logger.error(f"Error loading recovery dashboard: {str(e)}", exc_info=True)
-        flash(f"Error loading recovery dashboard: {str(e)}", "error")
-        return redirect(url_for('main_routes.index'))
+        current_app.logger.error(f"Error in recovery dashboard: {str(e)}", exc_info=True)
+        flash(f'Error loading recovery dashboard: {str(e)}', 'error')
+        return render_template('pages/recovery.html', documents=[])
 
 
-@main_routes.route('/admin/recover-pending', methods=['GET', 'POST'])
-def recover_pending_documents():
-    """Admin route to recover documents stuck in PENDING state"""
-    if request.method == 'POST':
-        action = request.form.get('action')
-        document_ids = request.form.getlist('document_ids')
+@main_routes.route('/admin/recover-pending')
+def recover_pending():
+    """Display pending documents that might be stuck for recovery"""
+    try:
+        # Get all documents with PENDING or PROCESSING status
+        pending_documents = Document.query.filter(
+            Document.status.in_(['PENDING', 'PROCESSING'])
+        ).order_by(Document.upload_date.desc()).all()
         
-        if not document_ids:
-            flash('No documents selected', 'error')
-            return redirect(url_for('main_routes.recover_pending_documents'))
-            
-        count = 0
+        # Prepare data for template
+        documents_data = []
         
-        # Convert string IDs to integers
-        doc_ids = [int(doc_id) for doc_id in document_ids if doc_id.isdigit()]
+        for doc in pending_documents:
+            # Calculate time since upload
+            time_since_upload = datetime.utcnow() - doc.upload_date
+            hours_pending = time_since_upload.total_seconds() / 3600
+            
+            # Only show documents that have been pending for more than 1 hour
+            if hours_pending < 1:
+                continue
+                
+            preview = None
+            try:
+                preview = preview_service.get_preview(doc.filename)
+            except Exception as e:
+                current_app.logger.error(f"Preview generation failed for {doc.filename}: {str(e)}")
+            
+            documents_data.append({
+                'id': doc.id,
+                'filename': doc.filename,
+                'upload_date': doc.upload_date.strftime('%Y-%m-%d %H:%M:%S'),
+                'file_size': f"{(doc.file_size/1024):.2f} KB",
+                'preview': preview,
+                'status': doc.status,
+                'hours_pending': round(hours_pending, 1)
+            })
         
-        if action == 'retry':
-            # Reprocess selected documents
-            for doc_id in doc_ids:
-                doc = Document.query.get(doc_id)
-                if doc and doc.status == 'PENDING':
-                    # Queue for reprocessing with the document task
-                    try:
-                        minio_path = f"{storage.bucket}/{doc.filename}"
-                        current_app.logger.info(f"Reprocessing document {doc.id}: {doc.filename}")
-                        
-                        # Explicitly import process_document
-                        from tasks.document_tasks import process_document
-                        task = process_document.delay(doc.filename, minio_path, doc.id)
-                        
-                        current_app.logger.info(f"Reprocessing task queued with ID: {task.id}")
-                        count += 1
-                    except Exception as e:
-                        current_app.logger.error(f"Error reprocessing document {doc.id}: {str(e)}")
-            
-            flash(f'Requeued {count} documents for processing', 'success')
-            
-        elif action == 'fail':
-            # Mark selected documents as failed
-            for doc_id in doc_ids:
-                doc = Document.query.get(doc_id)
-                if doc and doc.status == 'PENDING':
-                    doc.status = 'FAILED'
-                    count += 1
-            
-            db.session.commit()
-            flash(f'Marked {count} documents as FAILED', 'success')
-            
-        elif action == 'delete':
-            # Delete selected documents
-            for doc_id in doc_ids:
-                doc = Document.query.get(doc_id)
-                if doc and doc.status == 'PENDING':
-                    # Delete related records
-                    LLMKeyword.query.filter(LLMKeyword.llm_analysis_id.in_(
-                        db.session.query(LLMAnalysis.id).filter_by(document_id=doc.id)
-                    )).delete(synchronize_session=False)
-                    LLMAnalysis.query.filter_by(document_id=doc.id).delete()
-                    Classification.query.filter_by(document_id=doc.id).delete()
-                    DesignElement.query.filter_by(document_id=doc.id).delete()
-                    ExtractedText.query.filter_by(document_id=doc.id).delete()
-                    DropboxSync.query.filter_by(document_id=doc.id).delete()
-                    
-                    # Try to delete from MinIO
-                    try:
-                        storage.client.remove_object(storage.bucket, doc.filename)
-                    except Exception as e:
-                        current_app.logger.warning(f"Failed to remove object from MinIO: {str(e)}")
-                    
-                    # Delete document record
-                    db.session.delete(doc)
-                    count += 1
-            
-            db.session.commit()
-            flash(f'Deleted {count} documents', 'success')
+        return render_template('pages/recover_pending.html', documents=documents_data)
         
-        return redirect(url_for('main_routes.recover_pending_documents'))
-    
-    # Get pending documents
-    pending_docs = Document.query.filter_by(status='PENDING').all()
-    
-    return render_template(
-        'pages/recover_pending.html', 
-        documents=pending_docs,
-        count=len(pending_docs)
-    )
+    except Exception as e:
+        current_app.logger.error(f"Error in recover pending: {str(e)}", exc_info=True)
+        flash(f'Error loading recover pending dashboard: {str(e)}', 'error')
+        return render_template('pages/recover_pending.html', documents=[])
+
+
+@main_routes.route('/api/recover-document/<int:document_id>', methods=['POST'])
+def recover_document(document_id):
+    """Trigger reprocessing of a failed document"""
+    try:
+        document = Document.query.get_or_404(document_id)
+        
+        if document.status not in ['FAILED', 'PENDING', 'PROCESSING']:
+            return jsonify({
+                'status': 'error',
+                'message': f'Document is not in a recoverable state: {document.status}'
+            }), 400
+        
+        # Import recovery task
+        from tasks.recovery_tasks import reprocess_document
+        
+        # Reset document status
+        document.status = 'PENDING'
+        db.session.commit()
+        
+        # Get the file from MinIO storage
+        minio_path = f"{storage.bucket}/{document.filename}"
+        
+        # Queue reprocessing task
+        task = reprocess_document.delay(document.filename, minio_path, document.id)
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Document recovery initiated for {document.filename}',
+            'task_id': task.id
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"Error recovering document: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@main_routes.route('/api/recovery-status/<int:document_id>', methods=['GET'])
+def recovery_status(document_id):
+    """Get current status of a document"""
+    try:
+        document = Document.query.get_or_404(document_id)
+        
+        return jsonify({
+            'status': 'success',
+            'document_status': document.status,
+            'id': document.id,
+            'filename': document.filename
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"Error getting recovery status: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500

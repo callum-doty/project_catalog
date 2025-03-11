@@ -1,57 +1,111 @@
+# app/services/preview_service.py
+
 import os
-from functools import lru_cache
 from pdf2image import convert_from_bytes
 from PIL import Image
 import io
 import base64
-import hashlib
 from app.services.storage_service import MinIOStorage
-import redis
-import pickle
 import logging
-import uuid
-from pdf2image import convert_from_path
-
-logger = logging.getLogger(__name__)
+import tempfile
+from werkzeug.utils import secure_filename
 
 class PreviewService:
     def __init__(self):
         self.storage = MinIOStorage()
-        self.redis_client = redis.Redis(host='redis', port=6379, db=1)
-        self.cache_ttl = 3600  # 1 hour
         self.supported_images = ['.jpg', '.jpeg', '.png', '.gif']
         self.supported_pdfs = ['.pdf']
-        self.logger = logger 
+        self.logger = logging.getLogger(__name__)
         
-    def _get_cache_key(self, filename):
-        """Generate a cache key for a filename"""
-        return f"preview:{hashlib.md5(filename.encode()).hexdigest()}"
-        
+    def get_preview(self, filename):
+        """Generate preview for different file types"""
+        try:
+            self.logger.info(f"Generating preview for {filename}")
+            file_ext = os.path.splitext(filename)[1].lower()
+            
+            # Get file data from MinIO
+            try:
+                file_data = self.storage.get_file(filename)
+                if not file_data:
+                    self.logger.error(f"No file data received for {filename}")
+                    return None
+                self.logger.info(f"Retrieved file data for {filename}, size: {len(file_data)} bytes")
+            except Exception as e:
+                self.logger.error(f"Error retrieving file from storage: {str(e)}")
+                return None
+                
+            # Generate preview based on file type
+            if file_ext in self.supported_images:
+                return self._generate_image_preview(file_data)
+            elif file_ext in self.supported_pdfs:
+                return self._generate_pdf_preview(file_data)
+            else:
+                self.logger.warning(f"Unsupported file type: {file_ext}")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Preview generation error for {filename}: {str(e)}", exc_info=True)
+            return None
+
+    def _generate_image_preview(self, file_data):
+        """Generate preview for image files"""
+        try:
+            # Create a temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
+                temp_path = temp_file.name
+                temp_file.write(file_data)
+            
+            try:
+                # Open the image file
+                image = Image.open(temp_path)
+                
+                # Convert RGBA to RGB if necessary
+                if image.mode in ('RGBA', 'LA'):
+                    background = Image.new('RGB', image.size, (255, 255, 255))
+                    background.paste(image, mask=image.split()[-1])
+                    image = background
+                
+                # Resize maintaining aspect ratio
+                max_size = (300, 300)
+                image.thumbnail(max_size, Image.LANCZOS)
+                
+                # Save as JPEG for smaller size
+                buffered = io.BytesIO()
+                image.save(buffered, format="JPEG", quality=85, optimize=True)
+                img_str = base64.b64encode(buffered.getvalue()).decode()
+                
+                self.logger.info(f"Successfully generated image preview, size: {len(img_str)} chars")
+                return f"data:image/jpeg;base64,{img_str}"
+            finally:
+                # Clean up temporary file
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            
+        except Exception as e:
+            self.logger.error(f"Image preview generation error: {str(e)}", exc_info=True)
+            return None
+
     def _generate_pdf_preview(self, file_data):
         """Generate preview for PDF files"""
         try:
-            # Log the process
-            logger.info("Starting PDF preview generation")
-            
-            # Save file to temp location
-            temp_pdf = os.path.join('/tmp', f"temp_{uuid.uuid4().hex}.pdf")
-            with open(temp_pdf, 'wb') as f:
-                f.write(file_data)
+            # Create a temporary file for the PDF
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                temp_path = temp_file.name
+                temp_file.write(file_data)
             
             try:
-                # Check if poppler is available
-                logger.info("Converting PDF to image...")
-                images = convert_from_path(
-                    temp_pdf,
+                # Convert first page only with lower DPI for speed
+                images = convert_from_bytes(
+                    file_data,
                     first_page=1,
                     last_page=1,
-                    dpi=72,
+                    dpi=72,  # Lower DPI for preview
                     fmt='jpeg',
-                    size=(300, None)
+                    size=(300, None) 
                 )
                 
                 if not images:
-                    logger.warning("No images generated from PDF")
+                    self.logger.error("No images extracted from PDF")
                     return None
                     
                 image = images[0]
@@ -61,102 +115,13 @@ class PreviewService:
                 image.save(buffered, format="JPEG", quality=85, optimize=True)
                 img_str = base64.b64encode(buffered.getvalue()).decode()
                 
-                logger.info("Successfully generated PDF preview")
+                self.logger.info(f"Successfully generated PDF preview, size: {len(img_str)} chars")
                 return f"data:image/jpeg;base64,{img_str}"
-                
-            except Exception as e:
-                logger.error(f"PDF conversion error: {str(e)}")
-                # For PDFs, generate a generic preview if conversion fails
-                return self._generate_generic_preview("PDF Document")
-        
-        except Exception as e:
-            logger.error(f"PDF preview generation error: {str(e)}")
-            return None
-        
-    def _generate_generic_preview(self, label="Document"):
-        """Generate a simple text-based preview when image conversion fails"""
-        try:
-            # Create a simple image with PIL
-            from PIL import Image, ImageDraw, ImageFont
-            img = Image.new('RGB', (300, 300), color=(240, 240, 240))
-            d = ImageDraw.Draw(img)
-            d.text((150, 150), label, fill=(100, 100, 100), anchor="mm")
-            
-            # Convert to base64
-            buffered = io.BytesIO()
-            img.save(buffered, format="JPEG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            
-            return f"data:image/jpeg;base64,{img_str}"
-        except Exception as e:
-            logger.error(f"Generic preview generation failed: {str(e)}")
-            return None
-        
-    
-
-    def _generate_image_preview(self, file_data):
-        """Generate preview for image files"""
-        try:
-            image = Image.open(io.BytesIO(file_data))
-            
-            if image.mode in ('RGBA', 'LA'):
-                background = Image.new('RGB', image.size, (255, 255, 255))
-                background.paste(image, mask=image.split()[-1])
-                image = background
-            
-            image.thumbnail((300, 300), Image.LANCZOS)
-            
-            buffered = io.BytesIO()
-            image.save(buffered, format="JPEG", quality=85, optimize=True)
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            
-            return f"data:image/jpeg;base64,{img_str}"
+            finally:
+                # Clean up temporary file
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
             
         except Exception as e:
-            logger.error(f"Image preview generation error: {str(e)}")
-            return None
-
-    def get_preview(self, filename):
-        """Generate preview for different file types"""
-        try:
-            # Try to get from cache first
-            cache_key = self._get_cache_key(filename)
-            cached_preview = self.redis_client.get(cache_key)
-            if cached_preview:
-                return pickle.loads(cached_preview)
-                
-            # Not in cache, generate preview
-            file_ext = os.path.splitext(filename)[1].lower()
-            
-            try:
-                file_data = self.storage.get_file(filename)
-                if not file_data:
-                    self.logger.warning(f"No data found for file: {filename}")
-                    return None
-            except Exception as e:
-                self.logger.warning(f"Could not retrieve file {filename}: {str(e)}")
-                return None
-                
-            # Generate preview based on file type
-            preview = None
-            if file_ext in self.supported_images:
-                preview = self._generate_image_preview(file_data)
-            elif file_ext in self.supported_pdfs:
-                preview = self._generate_pdf_preview(file_data)
-            else:
-                self.logger.warning(f"Unsupported file type: {file_ext}")
-                return None
-                
-            # Cache the result if successful
-            if preview:
-                self.redis_client.setex(
-                    cache_key, 
-                    self.cache_ttl,
-                    pickle.dumps(preview)
-                )
-                
-            return preview
-                    
-        except Exception as e:
-            self.logger.error(f"Preview generation failed for {filename}: {str(e)}")
+            self.logger.error(f"PDF preview generation error: {str(e)}", exc_info=True)
             return None

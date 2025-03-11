@@ -1,5 +1,9 @@
 # tasks/__init__.py
-
+from .celery_app import celery_app
+from .utils import TASK_STATUSES, handle_task_failure, logger
+from .document_tasks import process_document
+from .dropbox_tasks import sync_dropbox
+from .recovery_tasks import reprocess_document
 # Import Redis fix before anything else
 try:
     import fix_redis
@@ -25,6 +29,9 @@ except ImportError as e:
 
 __all__ = [
     'celery_app',
+    'process_document',
+    'sync_dropbox',
+    'reprocess_document',
     'TASK_STATUSES',
     'handle_task_failure',
     'logger'
