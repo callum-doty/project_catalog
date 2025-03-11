@@ -21,6 +21,7 @@ class PreviewService:
         self.cache_ttl = 3600  # 1 hour
         self.supported_images = ['.jpg', '.jpeg', '.png', '.gif']
         self.supported_pdfs = ['.pdf']
+        self.logger = logger 
         
     def _get_cache_key(self, filename):
         """Generate a cache key for a filename"""
@@ -91,27 +92,7 @@ class PreviewService:
             logger.error(f"Generic preview generation failed: {str(e)}")
             return None
         
-    def _generate_preview(self, filename):
-        """Generate preview for different file types"""
-        try:
-            file_data = self.storage.get_file(filename)
-            if not file_data:
-                logger.error(f"No file data received for {filename}")
-                return None
-                
-            file_ext = os.path.splitext(filename)[1].lower()
-            
-            if file_ext in self.supported_images:
-                return self._generate_image_preview(file_data)
-            elif file_ext in self.supported_pdfs:
-                return self._generate_pdf_preview(file_data)
-            else:
-                logger.warning(f"Unsupported file type: {file_ext}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"Preview generation error: {str(e)}")
-            return None
+    
 
     def _generate_image_preview(self, file_data):
         """Generate preview for image files"""
@@ -138,22 +119,44 @@ class PreviewService:
     def get_preview(self, filename):
         """Generate preview for different file types"""
         try:
+            # Try to get from cache first
+            cache_key = self._get_cache_key(filename)
+            cached_preview = self.redis_client.get(cache_key)
+            if cached_preview:
+                return pickle.loads(cached_preview)
+                
+            # Not in cache, generate preview
             file_ext = os.path.splitext(filename)[1].lower()
             
-            # Get file from storage
-            from app.services.storage_service import MinIOStorage
-            storage = MinIOStorage()
-            file_data = storage.get_file(filename)
-            
-            if not file_data:
+            try:
+                file_data = self.storage.get_file(filename)
+                if not file_data:
+                    self.logger.warning(f"No data found for file: {filename}")
+                    return None
+            except Exception as e:
+                self.logger.warning(f"Could not retrieve file {filename}: {str(e)}")
                 return None
                 
+            # Generate preview based on file type
+            preview = None
             if file_ext in self.supported_images:
-                return self._generate_image_preview(file_data)
+                preview = self._generate_image_preview(file_data)
             elif file_ext in self.supported_pdfs:
-                return self._generate_pdf_preview(file_data)
+                preview = self._generate_pdf_preview(file_data)
             else:
+                self.logger.warning(f"Unsupported file type: {file_ext}")
                 return None
+                
+            # Cache the result if successful
+            if preview:
+                self.redis_client.setex(
+                    cache_key, 
+                    self.cache_ttl,
+                    pickle.dumps(preview)
+                )
+                
+            return preview
+                    
         except Exception as e:
             self.logger.error(f"Preview generation failed for {filename}: {str(e)}")
             return None
