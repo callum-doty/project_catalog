@@ -123,8 +123,6 @@ def process_document(self, filename, minio_path, document_id):
             from app.services.llm_parser import LLMResponseParser
             parser = LLMResponseParser()
             
-            # Store LLM Analysis and related data
-            # (Your existing code for storing analysis results)
             
             # Update status and commit
             doc.status = TASK_STATUSES['COMPLETED']

@@ -13,6 +13,16 @@ try:
     BACKOFF_AVAILABLE = True
 except ImportError:
     BACKOFF_AVAILABLE = False
+    
+def apply_backoff_decorator(func):
+    if BACKOFF_AVAILABLE:
+        return backoff.on_exception(
+            backoff.expo,
+            (httpx.RequestError, httpx.TimeoutException),
+            max_tries=5,
+            max_time=300
+        )(func)
+    return func
 
 
 logger = get_task_logger(__name__)
@@ -24,8 +34,6 @@ class LLMService:
         if not self.api_key:
             raise ValueError("CLAUDE_API_KEY environment variable is not set")
         
-        # Initialize headers with the updated Anthropic API version
-        # Note: Using the newest API version compatible with Claude 3 models
         self.headers = {
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",

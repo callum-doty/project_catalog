@@ -135,29 +135,25 @@ class PreviewService:
             logger.error(f"Image preview generation error: {str(e)}")
             return None
 
-    def _generate_pdf_preview(self, file_data):
-        """Generate preview for PDF files"""
+    def get_preview(self, filename):
+        """Generate preview for different file types"""
         try:
-            images = convert_from_bytes(
-                file_data,
-                first_page=1,
-                last_page=1,
-                dpi=72,
-                fmt='jpeg',
-                size=(300, None)
-            )
+            file_ext = os.path.splitext(filename)[1].lower()
             
-            if not images:
+            # Get file from storage
+            from app.services.storage_service import MinIOStorage
+            storage = MinIOStorage()
+            file_data = storage.get_file(filename)
+            
+            if not file_data:
                 return None
                 
-            image = images[0]
-            
-            buffered = io.BytesIO()
-            image.save(buffered, format="JPEG", quality=85, optimize=True)
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            
-            return f"data:image/jpeg;base64,{img_str}"
-            
+            if file_ext in self.supported_images:
+                return self._generate_image_preview(file_data)
+            elif file_ext in self.supported_pdfs:
+                return self._generate_pdf_preview(file_data)
+            else:
+                return None
         except Exception as e:
-            logger.error(f"PDF preview generation error: {str(e)}")
+            self.logger.error(f"Preview generation failed for {filename}: {str(e)}")
             return None
