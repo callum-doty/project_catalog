@@ -411,7 +411,7 @@ def recovery_dashboard():
             })
         
         return render_template(
-            'pages/recovery.html',
+            'pages/recovery.html', 
             total_docs=total_docs,
             status_counts=status_counts,
             failed_docs=formatted_failed_docs
