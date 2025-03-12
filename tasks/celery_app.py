@@ -75,13 +75,40 @@ def handle_task_failure(task_func):
             raise
     return wrapper
 
-# Simplified beat schedule for testing
+
+# Celery Beat schedule for regular tasks
 celery_app.conf.beat_schedule = {
-    'sync-dropbox-every-10-minutes': {
+    # Dropbox sync every 5 minutes
+    'sync-dropbox-every-5-minutes': {
         'task': 'tasks.sync_dropbox',
-        'schedule': crontab(minute='*/10'),  # Run every 10 minutes
+        'schedule': crontab(minute='*/5'),  # Run every 5 minutes
+    },
+    
+    # Recovery of pending documents every hour
+    'recover-pending-documents-hourly': {
+        'task': 'tasks.recover_pending_documents',
+        'schedule': crontab(minute=0, hour='*/1'),  # Run every hour
+    },
+    
+    # List all tasks (helps with debugging)
+    'list-tasks-daily': {
+        'task': 'tasks.list_tasks',
+        'schedule': crontab(minute=0, hour=0),  # Run once a day at midnight
     },
 }
+
+# Configure visibility timeout for longer-running tasks
+celery_app.conf.broker_transport_options = {'visibility_timeout': 3600}  # 1 hour
+
+# Set task time limits
+celery_app.conf.task_time_limit = 1800  # 30 minutes max runtime
+celery_app.conf.task_soft_time_limit = 1500  # 25 minutes soft limit
+
+# Configure concurrency
+celery_app.conf.worker_concurrency = 4  # Run up to 4 tasks simultaneously
+
+# Add task default queue
+celery_app.conf.task_default_queue = 'default'
 
 # Verify Redis connection on module import
 try:
