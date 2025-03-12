@@ -749,3 +749,28 @@ def recovery_status(document_id):
             'status': 'error',
             'message': str(e)
         }), 500
+
+
+@main_routes.route('/api/execute-sync', methods=['POST'])
+def execute_sync():
+    """Directly execute Dropbox sync (not just queue it)"""
+    try:
+        current_app.logger.info("Directly executing Dropbox sync")
+        
+        # Import the sync task function
+        from tasks.dropbox_tasks import sync_dropbox
+        
+        # Call the function directly (not as a task)
+        result = sync_dropbox()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Sync executed directly',
+            'result': result
+        })
+    except Exception as e:
+        current_app.logger.error(f"Error executing sync: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500

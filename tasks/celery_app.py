@@ -51,6 +51,7 @@ celery_app.conf.task_routes = {
     'tasks.process_document': {'queue': 'document_processing'},
     'tasks.test_document_processing': {'queue': 'document_processing'},
     'tasks.analyze_document': {'queue': 'analysis'},
+    'tasks.sync_dropbox': {'queue': 'document_processing'}, 
 }
 
 # Error handling decorator
@@ -74,6 +75,14 @@ def handle_task_failure(task_func):
                 logger.error(f"Failed to update document status: {str(db_error)}")
             raise
     return wrapper
+
+
+@celery_app.on_after_configure.connect
+def setup_periodic_tasks(sender, **kwargs):
+    logger.info("Setting up periodic tasks for Celery Beat")
+    # Log existing beat schedule
+    for task_name, task_config in sender.app.conf.beat_schedule.items():
+        logger.info(f"Scheduled task: {task_name} - {task_config['schedule']}")
 
 
 # Celery Beat schedule for regular tasks

@@ -36,7 +36,7 @@ case $SERVICE_TYPE in
     python -c "from celery import Celery; app = Celery('tasks'); app.autodiscover_tasks(['tasks'], force=True); print('Available tasks:', list(app.tasks.keys()))"
     
     # Start with very limited concurrency to prevent memory issues
-    celery -A tasks worker -Q document_processing,analysis --loglevel=info --concurrency=2
+    celery -A tasks worker -Q document_processing,analysis,celery --loglevel=info --concurrency=2
     ;;
     
   "beat")
