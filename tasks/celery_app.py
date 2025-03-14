@@ -81,7 +81,7 @@ def handle_task_failure(task_func):
 def setup_periodic_tasks(sender, **kwargs):
     logger.info("Setting up periodic tasks for Celery Beat")
     # Log existing beat schedule
-    for task_name, task_config in sender.app.conf.beat_schedule.items():
+    for task_name, task_config in sender.conf.beat_schedule.items():  # remove .app
         logger.info(f"Scheduled task: {task_name} - {task_config['schedule']}")
 
 
