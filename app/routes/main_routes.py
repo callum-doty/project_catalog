@@ -659,8 +659,16 @@ def recover_pending():
         documents_data = []
         
         for doc in pending_documents:
-            # Calculate time since upload
-            time_since_upload = datetime.utcnow() - doc.upload_date
+            # Calculate time since upload - handle timezone-aware dates correctly
+            if doc.upload_date.tzinfo:
+                # If doc.upload_date is timezone-aware, make utcnow timezone-aware too
+                from datetime import timezone
+                current_time = datetime.utcnow().replace(tzinfo=timezone.utc)
+            else:
+                # If doc.upload_date is naive, use naive utcnow
+                current_time = datetime.utcnow()
+                
+            time_since_upload = current_time - doc.upload_date
             hours_pending = time_since_upload.total_seconds() / 3600
             
             # Only show documents that have been pending for more than 1 hour
