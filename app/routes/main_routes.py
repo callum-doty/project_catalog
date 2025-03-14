@@ -1,6 +1,6 @@
 # app/routes/main_routes.py
 
-from flask import Blueprint, render_template, request, flash, redirect, url_for, jsonify, current_app
+from flask import Blueprint, render_template, request, session, flash, redirect, url_for, jsonify, current_app
 from werkzeug.utils import secure_filename
 import os
 from datetime import datetime
@@ -19,14 +19,54 @@ import statistics
 from statistics import mean
 from tasks.document_tasks import process_document
 from tasks.dropbox_tasks import sync_dropbox
-
-
+from functools import wraps
 
 main_routes = Blueprint('main_routes', __name__)
 storage = MinIOStorage()
 preview_service = PreviewService()
 search_times = []
 MAX_SEARCH_TIMES = 100
+
+
+
+
+def check_password(password):
+    """Check if the password is valid"""
+    correct_password = os.environ.get('SITE_PASSWORD', 'your_secure_password')
+    return password == correct_password
+
+def password_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # Check if user is already authenticated
+        if session.get('authenticated'):
+            return f(*args, **kwargs)
+        
+        # Check if password was submitted
+        if request.method == 'POST' and 'password' in request.form:
+            if check_password(request.form['password']):
+                session['authenticated'] = True
+                return redirect(request.path)
+            else:
+                return render_template('password.html', error='Incorrect password')
+        
+        # Show password form
+        return render_template('password.html')
+    return decorated
+
+# Protect all routes in this blueprint
+@main_routes.before_request
+def protect_blueprint():
+    if not session.get('authenticated'):
+        if request.endpoint != 'main_routes.static' and request.endpoint != 'main_routes.password_check':
+            return password_required(lambda: None)()
+
+# Add a route to handle password submission
+@main_routes.route('/password-check', methods=['GET', 'POST'])
+def password_check():
+    return password_required(lambda: redirect(url_for('main_routes.index')))()
+
+#end password section
 
 def get_celery_task(task_name):
     """Lazy import of celery tasks to avoid circular imports"""
@@ -43,6 +83,9 @@ def record_search_time(response_time):
     # Keep only the most recent times
     if len(search_times) > MAX_SEARCH_TIMES:
         search_times = search_times[-MAX_SEARCH_TIMES:]
+
+
+
 
 @main_routes.route('/')
 def index():

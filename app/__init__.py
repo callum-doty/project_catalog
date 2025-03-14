@@ -5,8 +5,10 @@ from flask_wtf.csrf import CSRFProtect
 from app.extensions import db, migrate
 from config.settings import settings
 import os
+import app, config
 
 csrf = CSRFProtect()
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'generate_a_secure_random_key')
 
 def create_app():
     """Create Flask application"""
