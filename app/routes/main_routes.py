@@ -356,12 +356,21 @@ def search_documents():
         
         # Return JSON for AJAX requests
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({
-                'results': results,
-                'pagination': pagination,
-                'response_time_ms': response_time,
-                'query': query
-            })
+            try:
+                response = jsonify({
+                    'results': results,
+                    'pagination': pagination,
+                    'response_time_ms': response_time,
+                    'query': query
+                })
+                return response
+            except Exception as e:
+                current_app.logger.error(f"Error serializing search results to JSON: {str(e)}")
+                # Return a simplified response with just error
+                return jsonify({
+                    'error': 'Error serializing search results',
+                    'query': query
+                })
         
         # Return HTML for direct browser requests
         return render_template(

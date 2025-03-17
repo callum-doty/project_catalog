@@ -13,8 +13,12 @@
     {% if documents %}
     <div class="text-gray-600 document-count mb-2 sm:mb-0">
       {% if pagination and pagination.total > 0 %}
-        Showing {{ ((pagination.page-1)*pagination.per_page + 1)|int }} to 
-        {{ min(((pagination.page-1)*pagination.per_page + documents|length)|int, pagination.total|int) }} of {{ pagination.total|int }} document{% if pagination.total|int != 1 %}s{% endif %}
+        {% set start_index = (pagination.page-1)*pagination.per_page + 1 %}
+        {% set end_index = (pagination.page-1)*pagination.per_page + documents|length %}
+        {% if end_index > pagination.total %}
+          {% set end_index = pagination.total %}
+        {% endif %}
+        Showing {{ start_index|int }} to {{ end_index|int }} of {{ pagination.total|int }} document{% if pagination.total|int != 1 %}s{% endif %}
         {% if response_time_ms %}<span class="text-sm">({{ response_time_ms }}ms)</span>{% endif %}
       {% else %}
         Found {{ documents|length }} document{% if documents|length != 1 %}s{% endif %}
@@ -85,9 +89,19 @@
       {% endif %}
       
       {% if pagination.pages %}
-        {% set start_page = [pagination.page - 2, 1]|max %}
-        {% set end_page = [start_page + 4, pagination.pages]|min %}
-        {% set start_page = [end_page - 4, 1]|max %}
+        {% set start_page = pagination.page - 2 %}
+        {% if start_page < 1 %}
+          {% set start_page = 1 %}
+        {% endif %}
+        
+        {% set end_page = start_page + 4 %}
+        {% if end_page > pagination.pages %}
+          {% set end_page = pagination.pages %}
+          {% set start_page = end_page - 4 %}
+          {% if start_page < 1 %}
+            {% set start_page = 1 %}
+          {% endif %}
+        {% endif %}
         
         {% for page_num in range(start_page, end_page + 1) %}
         <a href="{{ url_for('main_routes.search_documents', q=query, page=page_num, per_page=pagination.per_page, sort_by=sort_by, sort_dir=sort_dir) }}" 
