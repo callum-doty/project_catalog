@@ -203,14 +203,22 @@ def upload_file():
 
 @main_routes.route('/search')
 def search_documents():
+    # Get search parameters from request
     query = request.args.get('q', '')
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 12, type=int)  # Default to 12 items per page
+    sort_by = request.args.get('sort_by', 'upload_date')
+    sort_direction = request.args.get('sort_dir', 'desc')
+    
     start_time = time.time()  # Start timing
     
     try:
+        # Base query
         base_query = Document.query
-
+        
+        # Apply search filters if query is provided
         if query:
-            documents = base_query.join(Document.llm_analysis)\
+            base_query = base_query.join(Document.llm_analysis, isouter=True)\
                 .outerjoin(LLMKeyword, LLMAnalysis.id == LLMKeyword.llm_analysis_id)\
                 .filter(
                     or_(
@@ -218,10 +226,24 @@ def search_documents():
                         LLMAnalysis.summary_description.ilike(f'%{query}%'),
                         LLMKeyword.keyword.ilike(f'%{query}%')
                     )
-                ).distinct().all()
-        else:
-            documents = base_query.order_by(Document.upload_date.desc()).all()
-
+                ).distinct()
+        
+        # Apply sorting
+        if sort_by == 'filename':
+            if sort_direction == 'desc':
+                base_query = base_query.order_by(Document.filename.desc())
+            else:
+                base_query = base_query.order_by(Document.filename)
+        else:  # Default to sort by upload date
+            if sort_direction == 'desc':
+                base_query = base_query.order_by(Document.upload_date.desc())
+            else:
+                base_query = base_query.order_by(Document.upload_date)
+        
+        # Execute query with pagination
+        pagination = base_query.paginate(page=page, per_page=per_page, error_out=False)
+        documents = pagination.items
+        
         # Format results
         results = []
         for doc in documents:
@@ -255,10 +277,36 @@ def search_documents():
         response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
         record_search_time(response_time)
         
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify(results)
+        # Prepare pagination data for template
+        pagination_data = {
+            'page': page,
+            'per_page': per_page,
+            'total': pagination.total,
+            'pages': pagination.pages,
+            'has_prev': pagination.has_prev,
+            'has_next': pagination.has_next,
+            'prev_page': pagination.prev_num if pagination.has_prev else None,
+            'next_page': pagination.next_num if pagination.has_next else None,
+        }
         
-        return render_template('pages/search.html', documents=results, query=query)
+        # Return JSON for AJAX requests
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({
+                'results': results,
+                'pagination': pagination_data,
+                'response_time_ms': response_time
+            })
+        
+        # Return HTML for direct browser requests
+        return render_template(
+            'pages/search.html', 
+            documents=results, 
+            query=query,
+            pagination=pagination_data,
+            sort_by=sort_by,
+            sort_dir=sort_direction,
+            response_time_ms=round(response_time, 2)
+        )
         
     except Exception as e:
         # Still record the time even for errors
@@ -266,7 +314,7 @@ def search_documents():
         record_search_time(response_time)
         
         current_app.logger.error(f"Search error: {str(e)}")
-        return render_template('pages/search.html', documents=[], query=query)
+        return render_template('pages/search.html', documents=[], query=query, error=str(e))
 
 @main_routes.route('/api/sync-dropbox', methods=['POST'])
 def trigger_dropbox_sync():  # Renamed function to avoid conflict
