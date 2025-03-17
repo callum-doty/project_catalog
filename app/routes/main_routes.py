@@ -57,14 +57,36 @@ def password_required(f):
 # Protect all routes in this blueprint
 @main_routes.before_request
 def protect_blueprint():
+    # Add debug logging
+    current_app.logger.info(f"Accessing route: {request.endpoint} with method {request.method}")
+    
+    # Skip authentication for certain endpoints
+    if request.endpoint in ['main_routes.static', 'main_routes.password_check']:
+        return None
+    
+    # Check if authenticated
     if not session.get('authenticated'):
-        if request.endpoint != 'main_routes.static' and request.endpoint != 'main_routes.password_check':
-            return password_required(lambda: None)()
+        return redirect(url_for('main_routes.password_check'))
+    
+    return None
 
 # Add a route to handle password submission
 @main_routes.route('/password-check', methods=['GET', 'POST'])
 def password_check():
-    return password_required(lambda: redirect(url_for('main_routes.index')))()
+    # For debugging - log the request method
+    current_app.logger.info(f"Password check accessed with method: {request.method}")
+    
+    # Handle POST requests directly
+    if request.method == 'POST':
+        if 'password' in request.form:
+            if check_password(request.form['password']):
+                session['authenticated'] = True
+                return redirect(url_for('main_routes.index'))
+            else:
+                return render_template('password.html', error='Incorrect password')
+    
+    # For GET requests, show the password form
+    return render_template('password.html')
 
 #end password section
 

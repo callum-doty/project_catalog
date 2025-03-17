@@ -18,8 +18,9 @@ def create_app():
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'generate_a_secure_random_key')
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['WTF_CSRF_CHECK_DEFAULT'] = False
-    app.config['WTF_CSRF_TIME_LIMIT'] = None
+    app.config['WTF_CSRF_CHECK_DEFAULT'] = False  # Allow non-CSRF protected views by default
+    app.config['WTF_CSRF_TIME_LIMIT'] = None      # No time limit for CSRF tokens
+    app.config['WTF_CSRF_SSL_STRICT'] = False     # Don't require HTTPS for CSRF
     
     # Initialize extensions
     csrf.init_app(app)
