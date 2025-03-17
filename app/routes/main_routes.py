@@ -213,21 +213,39 @@ def search_documents():
     start_time = time.time()  # Start timing
     
     try:
+        # Log search parameters for debugging
+        current_app.logger.info(f"Search params: query='{query}', page={page}, per_page={per_page}, sort_by={sort_by}, sort_dir={sort_direction}")
+        
         # Base query
         base_query = Document.query
         
         # Apply search filters if query is provided
         if query:
-            base_query = base_query.join(Document.llm_analysis, isouter=True)\
-                .outerjoin(LLMKeyword, LLMAnalysis.id == LLMKeyword.llm_analysis_id)\
-                .filter(
-                    or_(
-                        Document.filename.ilike(f'%{query}%'),
-                        LLMAnalysis.summary_description.ilike(f'%{query}%'),
-                        LLMKeyword.keyword.ilike(f'%{query}%')
-                    )
-                ).distinct()
+            current_app.logger.info(f"Applying search filters for query: '{query}'")
+            # Safer query with try/except for each join to avoid errors if relationships don't exist
+            try:
+                base_query = base_query.outerjoin(Document.llm_analysis)\
+                    .outerjoin(LLMKeyword, LLMAnalysis.id == LLMKeyword.llm_analysis_id)\
+                    .filter(
+                        or_(
+                            Document.filename.ilike(f'%{query}%'),
+                            LLMAnalysis.summary_description.ilike(f'%{query}%'),
+                            LLMKeyword.keyword.ilike(f'%{query}%')
+                        )
+                    ).distinct()
+            except Exception as e:
+                current_app.logger.error(f"Error in search query joins: {str(e)}")
+                # Fallback to just filename search
+                base_query = Document.query.filter(Document.filename.ilike(f'%{query}%'))
         
+        # Count total results for debugging
+        try:
+            total_count = base_query.count()
+            current_app.logger.info(f"Total matching documents before pagination: {total_count}")
+        except Exception as e:
+            current_app.logger.error(f"Error counting results: {str(e)}")
+            total_count = 0
+            
         # Apply sorting
         if sort_by == 'filename':
             if sort_direction == 'desc':
@@ -240,9 +258,61 @@ def search_documents():
             else:
                 base_query = base_query.order_by(Document.upload_date)
         
-        # Execute query with pagination
-        pagination = base_query.paginate(page=page, per_page=per_page, error_out=False)
-        documents = pagination.items
+        # Handle scenario when empty results
+        if total_count == 0:
+            # If no results with search query, show recent documents instead
+            if query:
+                current_app.logger.info(f"No results for '{query}', returning empty result set")
+                documents = []
+                pagination = {
+                    'page': page,
+                    'per_page': per_page,
+                    'total': 0,
+                    'pages': 0,
+                    'has_prev': False,
+                    'has_next': False
+                }
+            else:
+                # For empty search query, show most recent documents
+                current_app.logger.info("Empty query, showing recent documents")
+                recent_docs = Document.query.order_by(Document.upload_date.desc()).limit(per_page).all()
+                documents = recent_docs
+                pagination = {
+                    'page': 1,
+                    'per_page': per_page,
+                    'total': len(recent_docs),
+                    'pages': 1,
+                    'has_prev': False,
+                    'has_next': False
+                }
+        else:
+            # Execute query with pagination
+            try:
+                paginated_result = base_query.paginate(page=page, per_page=per_page, error_out=False)
+                documents = paginated_result.items
+                
+                # Log pagination results
+                current_app.logger.info(f"Pagination results: page={paginated_result.page}, " +
+                                        f"pages={paginated_result.pages}, items={len(documents)}")
+                
+                # Create pagination object
+                pagination = {
+                    'page': paginated_result.page,
+                    'per_page': per_page,
+                    'total': paginated_result.total,
+                    'pages': paginated_result.pages,
+                    'has_prev': paginated_result.has_prev,
+                    'has_next': paginated_result.has_next,
+                    'prev_page': paginated_result.prev_num if paginated_result.has_prev else None,
+                    'next_page': paginated_result.next_num if paginated_result.has_next else None
+                }
+            except Exception as e:
+                current_app.logger.error(f"Error during pagination: {str(e)}")
+                documents = []
+                pagination = {
+                    'page': page, 'per_page': per_page, 'total': 0, 'pages': 0,
+                    'has_prev': False, 'has_next': False, 'prev_page': None, 'next_page': None
+                }
         
         # Format results
         results = []
@@ -254,47 +324,43 @@ def search_documents():
             except Exception as e:
                 current_app.logger.error(f"Preview generation failed for {doc.filename}: {str(e)}")
             
-            result = {
-                'id': doc.id,
-                'filename': doc.filename,
-                'upload_date': doc.upload_date.strftime('%Y-%m-%d %H:%M:%S'),
-                'preview': preview,
-                'summary': doc.llm_analysis.summary_description if doc.llm_analysis else '',
-                'keywords': []
-            }
-            
-            if doc.llm_analysis and doc.llm_analysis.keywords:
-                result['keywords'] = [
-                    {
-                        'text': kw.keyword,
-                        'category': kw.category
-                    } for kw in doc.llm_analysis.keywords
-                ]
-            
-            results.append(result)
-            
+            # Safely get document attributes
+            try:
+                result = {
+                    'id': doc.id,
+                    'filename': doc.filename,
+                    'upload_date': doc.upload_date.strftime('%Y-%m-%d %H:%M:%S'),
+                    'preview': preview,
+                    'summary': doc.llm_analysis.summary_description if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
+                    'keywords': []
+                }
+                
+                if hasattr(doc, 'llm_analysis') and doc.llm_analysis and hasattr(doc.llm_analysis, 'keywords'):
+                    result['keywords'] = [
+                        {
+                            'text': kw.keyword,
+                            'category': kw.category
+                        } for kw in doc.llm_analysis.keywords if hasattr(kw, 'keyword')
+                    ]
+                
+                results.append(result)
+            except Exception as e:
+                current_app.logger.error(f"Error formatting document {doc.id}: {str(e)}")
+        
         # Record search time
         response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
         record_search_time(response_time)
         
-        # Prepare pagination data for template
-        pagination_data = {
-            'page': page,
-            'per_page': per_page,
-            'total': pagination.total,
-            'pages': pagination.pages,
-            'has_prev': pagination.has_prev,
-            'has_next': pagination.has_next,
-            'prev_page': pagination.prev_num if pagination.has_prev else None,
-            'next_page': pagination.next_num if pagination.has_next else None,
-        }
+        # Log performance statistics
+        current_app.logger.info(f"Search completed in {response_time:.2f}ms, returned {len(results)} results")
         
         # Return JSON for AJAX requests
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify({
                 'results': results,
-                'pagination': pagination_data,
-                'response_time_ms': response_time
+                'pagination': pagination,
+                'response_time_ms': response_time,
+                'query': query
             })
         
         # Return HTML for direct browser requests
@@ -302,7 +368,7 @@ def search_documents():
             'pages/search.html', 
             documents=results, 
             query=query,
-            pagination=pagination_data,
+            pagination=pagination,
             sort_by=sort_by,
             sort_dir=sort_direction,
             response_time_ms=round(response_time, 2)
@@ -313,7 +379,7 @@ def search_documents():
         response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
         record_search_time(response_time)
         
-        current_app.logger.error(f"Search error: {str(e)}")
+        current_app.logger.error(f"Search error: {str(e)}", exc_info=True)
         return render_template('pages/search.html', documents=[], query=query, error=str(e))
 
 @main_routes.route('/api/sync-dropbox', methods=['POST'])
