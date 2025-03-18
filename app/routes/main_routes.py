@@ -66,7 +66,9 @@ def protect_blueprint():
     
     # Check if authenticated
     if not session.get('authenticated'):
-        return redirect(url_for('main_routes.password_check'))
+        # Preserve the requested URL as 'next' parameter
+        next_url = request.url
+        return redirect(url_for('main_routes.password_check', next=next_url))
     
     return None
 
@@ -81,7 +83,9 @@ def password_check():
         if 'password' in request.form:
             if check_password(request.form['password']):
                 session['authenticated'] = True
-                return redirect(url_for('main_routes.search_documents'))
+                # Use relative URL for redirection
+                next_url = request.args.get('next') or url_for('main_routes.search_documents')
+                return redirect(next_url)
             else:
                 return render_template('password.html', error='Incorrect password')
     

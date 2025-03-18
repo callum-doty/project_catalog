@@ -5,7 +5,7 @@
     <div class="flex justify-between">
       <div class="flex space-x-7">
         <a
-          href="{{ url_for('main_routes.index') }}"
+          href="{{ url_for('main_routes.search_documents') }}"
           class="flex items-center py-4 px-2"
         >
           <span class="font-semibold text-gray-500 text-lg"
@@ -16,7 +16,7 @@
       <div class="flex items-center space-x-4">
         {% include 'components/nav/sync_status.html' %}
         <a
-          href="{{ url_for('main_routes.index') }}"
+          href="{{ url_for('main_routes.home') }}"
           class="py-4 px-2 text-gray-500 hover:text-blue-500 transition duration-300"
           >Upload</a
         >
