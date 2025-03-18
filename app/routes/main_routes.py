@@ -46,7 +46,7 @@ def password_required(f):
         if request.method == 'POST' and 'password' in request.form:
             if check_password(request.form['password']):
                 session['authenticated'] = True
-                return redirect(request.path)
+                return redirect(url_for('main_routes.search_documents'))
             else:
                 return render_template('password.html', error='Incorrect password')
         
@@ -81,7 +81,7 @@ def password_check():
         if 'password' in request.form:
             if check_password(request.form['password']):
                 session['authenticated'] = True
-                return redirect(url_for('main_routes.index'))
+                return redirect(url_for('main_routes.search_documents'))
             else:
                 return render_template('password.html', error='Incorrect password')
     
@@ -111,6 +111,12 @@ def record_search_time(response_time):
 
 @main_routes.route('/')
 def index():
+    # Redirect to the search page instead of showing the index page
+    return redirect(url_for('main_routes.search_documents'))
+
+# The original index route is kept as a separate route for reference
+@main_routes.route('/home')
+def home():
     try:
         documents = Document.query.order_by(Document.upload_date.desc()).limit(10).all()
         formatted_docs = []
@@ -155,12 +161,12 @@ def index():
 def upload_file():
     if 'file' not in request.files:
         flash('No file part', 'error')
-        return redirect(url_for('main_routes.index'))
+        return redirect(url_for('main_routes.search_documents'))
     
     file = request.files['file']
     if file.filename == '':
         flash('No selected file', 'error')
-        return redirect(url_for('main_routes.index'))
+        return redirect(url_for('main_routes.search_documents'))
 
     try:
         filename = secure_filename(file.filename)
@@ -194,12 +200,12 @@ def upload_file():
         
         os.remove(temp_path)
         flash('File uploaded successfully', 'success')
-        return redirect(url_for('main_routes.index'))
+        return redirect(url_for('main_routes.search_documents'))
 
     except Exception as e:
         current_app.logger.error(f"Upload error: {str(e)}")
         flash(f'Error uploading file: {str(e)}', 'error')
-        return redirect(url_for('main_routes.index'))
+        return redirect(url_for('main_routes.search_documents'))
 
 @main_routes.route('/search')
 def search_documents():
@@ -750,7 +756,7 @@ def metrics_dashboard():
     except Exception as e:
         current_app.logger.error(f"Error generating metrics: {str(e)}")
         flash(f"Error generating metrics: {str(e)}", "error")
-        return redirect(url_for('main_routes.index'))
+        return redirect(url_for('main_routes.search_documents'))
 
 
 @main_routes.route('/api/search-metrics')
