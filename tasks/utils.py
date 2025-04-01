@@ -1,9 +1,8 @@
 # tasks/utils.py
-
 import functools
-from celery.utils.log import get_task_logger
+import logging
 
-logger = get_task_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # Task status tracking
 TASK_STATUSES = {
@@ -20,6 +19,7 @@ def handle_task_failure(task_func):
             return task_func(*args, **kwargs)
         except Exception as e:
             logger.error(f"Task failed: {str(e)}", exc_info=True)
+            # Update document status to failed if document_id is provided
             try:
                 from app.models import Document, db
                 document_id = kwargs.get('document_id')

@@ -7,8 +7,6 @@ ENV PYTHONPATH=/app \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-WORKDIR /app
-
 # Install system dependencies AS ROOT
 RUN apt-get update && apt-get install -y \
     poppler-utils \

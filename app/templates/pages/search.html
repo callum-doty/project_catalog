@@ -3,8 +3,8 @@
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
   <!-- Search Bar -->
   <div class="mb-8">
-    {% from 'components/forms/search_form.html' import search_form %} {{
-    search_form(query) }}
+    {% from 'components/forms/search_form.html' import search_form %}
+    {{ search_form(query, filter_options, filter_type, filter_year, filter_location) }}
   </div>
 
   <!-- Results Summary and Controls -->

@@ -12,6 +12,9 @@ services:
       - MINIO_ACCESS_KEY=minioaccess
       - MINIO_SECRET_KEY=miniosecret
       - MINIO_BUCKET=documents
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
     volumes:
       - .:/app
@@ -58,46 +61,39 @@ services:
 
   celery-worker:
     build: .
-    command: celery -A tasks.celery_app worker -Q document_processing,analysis --loglevel=info
+    command: celery -A tasks worker -Q document_processing,analysis,celery --loglevel=info
     volumes:
       - .:/app
     environment:
+      - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://custom_user:strong_password@db:5432/catalog_db
+      - SQLALCHEMY_DATABASE_URI=postgresql://custom_user:strong_password@db:5432/catalog_db
       - DROPBOX_ACCESS_TOKEN=${DROPBOX_ACCESS_TOKEN}
       - DROPBOX_FOLDER_PATH=${DROPBOX_FOLDER_PATH}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
     depends_on:
       - redis
+      - db
 
   celery-beat:
     build: .
-    command: celery -A tasks.celery_app beat --loglevel=info
+    command: celery -A tasks beat --loglevel=info
     volumes:
       - .:/app
     environment:
+      - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://custom_user:strong_password@db:5432/catalog_db
+      - SQLALCHEMY_DATABASE_URI=postgresql://custom_user:strong_password@db:5432/catalog_db
       - DROPBOX_ACCESS_TOKEN=${DROPBOX_ACCESS_TOKEN}
       - DROPBOX_FOLDER_PATH=${DROPBOX_FOLDER_PATH}
-      - FLASK_APP=wsgi.py
-      - FLASK_ENV=development
-      - DATABASE_URL=${DATABASE_URL}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
     depends_on:
       - redis
-      - celery-worker
-
-  celery:
-    build: .
-    command: celery -A tasks.celery_app worker -Q celery --loglevel=info
-    volumes:
-      - .:/app
-    environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - DROPBOX_ACCESS_TOKEN=${DROPBOX_ACCESS_TOKEN}
-      - DROPBOX_FOLDER_PATH=${DROPBOX_FOLDER_PATH}
-    depends_on:
-      - redis
+      - db
 
 volumes:
   postgres_data:

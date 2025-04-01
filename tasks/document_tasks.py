@@ -3,15 +3,25 @@
 import os
 import time
 import json
-from .celery_app import Task
+from celery import Task
+from .celery_app import celery_app
+from .task_base import DocumentProcessor
 from .celery_app import celery_app, logger
-from .utils import TASK_STATUSES, handle_task_failure
-from app.models.models import Document, LLMAnalysis, LLMKeyword, Classification, DesignElement, ExtractedText, DropboxSync  
+from .utils import TASK_STATUSES
+from app.models.models import Document, LLMAnalysis, LLMKeyword, Classification, DesignElement, ExtractedText, DropboxSync, Entity, CommunicationFocus
 from datetime import datetime, timedelta
-from app.services.storage_service import MinIOStorage
 from app.extensions import db
+from app.services.storage_service import MinIOStorage
+import logging
 
-class DocumentProcessor(Task):
+
+
+
+logger = logging.getLogger(__name__)
+
+
+class DocumentProcessorTask(Task):
+    """Base class for document processing tasks"""
     abstract = True
     _storage = None
     _llm_service = None
@@ -19,7 +29,6 @@ class DocumentProcessor(Task):
     @property
     def storage(self):
         if self._storage is None:
-            from app.services.storage_service import MinIOStorage
             self._storage = MinIOStorage()
         return self._storage
     
@@ -39,7 +48,6 @@ class DocumentProcessor(Task):
         except Exception as e:
             logger.error(f"Error downloading file: {str(e)}")
             return None
-
 
 @celery_app.task(name='tasks.list_tasks')
 def list_tasks():
@@ -62,10 +70,6 @@ def test_document_processing(self, document_id):
         
         with app.app_context():
             # Update document status
-            from app.models.models import Document
-            from tasks.celery_app import TASK_STATUSES
-            from app.extensions import db
-            
             doc = Document.query.get(document_id)
             if doc:
                 logger.info(f"Found document: {doc.filename}")
@@ -81,7 +85,7 @@ def test_document_processing(self, document_id):
         raise
 
 
-@celery_app.task(bind=True, name='tasks.process_document')
+@celery_app.task(bind=True, base=DocumentProcessorTask, name='tasks.process_document')
 def process_document(self, filename, minio_path, document_id):
     """Process document through the pipeline"""
     logger.info(f"=== STARTING DOCUMENT PROCESSING ===")
@@ -119,11 +123,6 @@ def process_document(self, filename, minio_path, document_id):
 
             store_analysis_results(document_id, response)
             
-            # Parse results
-            from app.services.llm_parser import LLMResponseParser
-            parser = LLMResponseParser()
-            
-            
             # Update status and commit
             doc.status = TASK_STATUSES['COMPLETED']
             db.session.commit()
@@ -137,14 +136,8 @@ def process_document(self, filename, minio_path, document_id):
             db.session.commit()
             raise
 
-# Update to tasks/document_tasks.py - store_analysis_results function
-
 def store_analysis_results(document_id: int, response: dict):
     """Store analysis results in database"""
-    from app.models.models import (Document, LLMAnalysis, ExtractedText, 
-                                 LLMKeyword, Classification, DesignElement,
-                                 Entity, CommunicationFocus)
-    from app.extensions import db
     from app.services.llm_parser import LLMResponseParser
     
     try:
@@ -198,22 +191,28 @@ def store_analysis_results(document_id: int, response: dict):
         logger.info(f"Stored classification for document {document_id}")
         
         # NEW: Store Entity Information
-        entity_data = parser.parse_entity_info(response)
-        entity = Entity(
-            document_id=document_id,
-            **entity_data
-        )
-        db.session.add(entity)
-        logger.info(f"Stored entity information for document {document_id}")
+        try:
+            entity_data = parser.parse_entity_info(response)
+            entity = Entity(
+                document_id=document_id,
+                **entity_data
+            )
+            db.session.add(entity)
+            logger.info(f"Stored entity information for document {document_id}")
+        except Exception as e:
+            logger.error(f"Failed to store entity information: {str(e)}")
         
         # NEW: Store Communication Focus
-        focus_data = parser.parse_communication_focus(response)
-        focus = CommunicationFocus(
-            document_id=document_id,
-            **focus_data
-        )
-        db.session.add(focus)
-        logger.info(f"Stored communication focus for document {document_id}")
+        try:
+            focus_data = parser.parse_communication_focus(response)
+            focus = CommunicationFocus(
+                document_id=document_id,
+                **focus_data
+            )
+            db.session.add(focus)
+            logger.info(f"Stored communication focus for document {document_id}")
+        except Exception as e:
+            logger.error(f"Failed to store communication focus: {str(e)}")
         
         # Commit all changes to database
         db.session.commit()
@@ -225,7 +224,6 @@ def store_analysis_results(document_id: int, response: dict):
         logger.error(f"Error storing analysis results: {str(e)}")
         db.session.rollback()
         raise
-
 
 
 @celery_app.task(name='tasks.recover_pending_documents')
@@ -242,7 +240,6 @@ def recover_pending_documents():
             .all()
         
         logger.info(f"Found {len(stuck_documents)} documents stuck in PENDING state")
-        
         storage = MinIOStorage()  # Initialize storage service
         
         for doc in stuck_documents:
