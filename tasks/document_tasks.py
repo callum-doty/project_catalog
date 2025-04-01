@@ -3,7 +3,7 @@
 import os
 import time
 import json
-from celery import Task
+from .celery_app import Task
 from .celery_app import celery_app, logger
 from .utils import TASK_STATUSES, handle_task_failure
 from app.models.models import Document, LLMAnalysis, LLMKeyword, Classification, DesignElement, ExtractedText, DropboxSync  
@@ -137,49 +137,89 @@ def process_document(self, filename, minio_path, document_id):
             db.session.commit()
             raise
 
+# Update to tasks/document_tasks.py - store_analysis_results function
+
 def store_analysis_results(document_id: int, response: dict):
     """Store analysis results in database"""
-    from app.models.models import Document, LLMAnalysis, ExtractedText, LLMKeyword
+    from app.models.models import (Document, LLMAnalysis, ExtractedText, 
+                                 LLMKeyword, Classification, DesignElement,
+                                 Entity, CommunicationFocus)
     from app.extensions import db
+    from app.services.llm_parser import LLMResponseParser
     
     try:
+        parser = LLMResponseParser()
+        
         # Store LLM Analysis
-        analysis_data = response.get('document_analysis', {})
+        llm_analysis_data = parser.parse_llm_analysis(response)
         llm_analysis = LLMAnalysis(
             document_id=document_id,
-            summary_description=analysis_data.get('summary', ''),
-            visual_analysis=response.get('design_elements', {}).get('theme', ''),
-            content_analysis=json.dumps(response),
-            confidence_score=float(analysis_data.get('confidence_score', 0.9)),
-            analysis_date=datetime.utcnow(),
-            model_version='claude-3-opus-20240229'  # Updated to Claude 3 Opus
+            **llm_analysis_data
         )
         db.session.add(llm_analysis)
         db.session.flush()  # Get the ID for keywords
-
-        # Store Keywords
-        keywords_data = response.get('keywords', [])
-        for keyword in keywords_data[:5]:  # Limit to 5 keywords
-            keyword_entry = LLMKeyword(
-                llm_analysis_id=llm_analysis.id,
-                keyword=keyword.get('text', ''),
-                category=keyword.get('category', ''),
-                relevance_score=int(float(keyword.get('confidence', 0.9)) * 100)
-            )
-            db.session.add(keyword_entry)
-
-        # Store Extracted Text
-        text_data = response.get('extracted_text', {})
-        text_entry = ExtractedText(
-            document_id=document_id,
-            text_content=f"{text_data.get('main_message', '')}\n\n{text_data.get('supporting_text', '')}",
-            confidence=float(text_data.get('confidence', 0.9)),
-            extraction_date=datetime.utcnow()
-        )
-        db.session.add(text_entry)
+        logger.info(f"Stored LLM analysis for document {document_id}")
         
+        # Store Keywords
+        keywords_data = parser.parse_keywords(response)
+        for keyword_data in keywords_data:
+            keyword = LLMKeyword(
+                llm_analysis_id=llm_analysis.id,
+                **keyword_data
+            )
+            db.session.add(keyword)
+        logger.info(f"Stored {len(keywords_data)} keywords for document {document_id}")
+        
+        # Store Extracted Text
+        extracted_text_data = parser.parse_extracted_text(response)
+        extracted_text = ExtractedText(
+            document_id=document_id,
+            **extracted_text_data
+        )
+        db.session.add(extracted_text)
+        logger.info(f"Stored extracted text for document {document_id}")
+        
+        # Store Design Elements
+        design_data = parser.parse_design_elements(response)
+        design_element = DesignElement(
+            document_id=document_id,
+            **design_data
+        )
+        db.session.add(design_element)
+        logger.info(f"Stored design elements for document {document_id}")
+        
+        # Store Classification
+        classification_data = parser.parse_classification(response)
+        classification = Classification(
+            document_id=document_id,
+            **classification_data
+        )
+        db.session.add(classification)
+        logger.info(f"Stored classification for document {document_id}")
+        
+        # NEW: Store Entity Information
+        entity_data = parser.parse_entity_info(response)
+        entity = Entity(
+            document_id=document_id,
+            **entity_data
+        )
+        db.session.add(entity)
+        logger.info(f"Stored entity information for document {document_id}")
+        
+        # NEW: Store Communication Focus
+        focus_data = parser.parse_communication_focus(response)
+        focus = CommunicationFocus(
+            document_id=document_id,
+            **focus_data
+        )
+        db.session.add(focus)
+        logger.info(f"Stored communication focus for document {document_id}")
+        
+        # Commit all changes to database
         db.session.commit()
-        logger.info(f"Successfully stored analysis results for document {document_id}")
+        logger.info(f"Successfully stored all analysis results for document {document_id}")
+        
+        return True
         
     except Exception as e:
         logger.error(f"Error storing analysis results: {str(e)}")

@@ -211,52 +211,65 @@ def upload_file():
         flash(f'Error uploading file: {str(e)}', 'error')
         return redirect(url_for('main_routes.search_documents'))
 
+# Update to main_routes.py - search_documents function
+
 @main_routes.route('/search')
 def search_documents():
     # Get search parameters from request
     query = request.args.get('q', '')
     page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 12, type=int)  # Default to 12 items per page
+    per_page = request.args.get('per_page', 12, type=int)
     sort_by = request.args.get('sort_by', 'upload_date')
     sort_direction = request.args.get('sort_dir', 'desc')
+    
+    # New filter parameters
+    filter_type = request.args.get('filter_type', '')
+    filter_year = request.args.get('filter_year', '')
+    filter_location = request.args.get('filter_location', '')
     
     start_time = time.time()  # Start timing
     
     try:
-        # Log search parameters for debugging
-        current_app.logger.info(f"Search params: query='{query}', page={page}, per_page={per_page}, sort_by={sort_by}, sort_dir={sort_direction}")
-        
-        # Base query
+        # Base query - Updated with new joins
         base_query = Document.query
         
         # Apply search filters if query is provided
         if query:
-            current_app.logger.info(f"Applying search filters for query: '{query}'")
-            # Safer query with try/except for each join to avoid errors if relationships don't exist
-            try:
-                base_query = base_query.outerjoin(Document.llm_analysis)\
-                    .outerjoin(LLMKeyword, LLMAnalysis.id == LLMKeyword.llm_analysis_id)\
-                    .filter(
-                        or_(
-                            Document.filename.ilike(f'%{query}%'),
-                            LLMAnalysis.summary_description.ilike(f'%{query}%'),
-                            LLMKeyword.keyword.ilike(f'%{query}%')
-                        )
-                    ).distinct()
-            except Exception as e:
-                current_app.logger.error(f"Error in search query joins: {str(e)}")
-                # Fallback to just filename search
-                base_query = Document.query.filter(Document.filename.ilike(f'%{query}%'))
+            base_query = base_query.outerjoin(Document.llm_analysis)\
+                .outerjoin(LLMKeyword, LLMAnalysis.id == LLMKeyword.llm_analysis_id)\
+                .outerjoin(Document.entity)\
+                .outerjoin(Document.communication_focus)\
+                .outerjoin(Document.extracted_text)\
+                .filter(
+                    or_(
+                        Document.filename.ilike(f'%{query}%'),
+                        LLMAnalysis.summary_description.ilike(f'%{query}%'),
+                        LLMKeyword.keyword.ilike(f'%{query}%'),
+                        Entity.client_name.ilike(f'%{query}%'),
+                        Entity.opponent_name.ilike(f'%{query}%'),
+                        CommunicationFocus.primary_issue.ilike(f'%{query}%'),
+                        ExtractedText.main_message.ilike(f'%{query}%'),
+                        ExtractedText.supporting_text.ilike(f'%{query}%')
+                    )
+                ).distinct()
         
-        # Count total results for debugging
-        try:
-            total_count = base_query.count()
-            current_app.logger.info(f"Total matching documents before pagination: {total_count}")
-        except Exception as e:
-            current_app.logger.error(f"Error counting results: {str(e)}")
-            total_count = 0
+        # Apply filters from advanced search form
+        if filter_type:
+            base_query = base_query.join(Document.llm_analysis)\
+                .filter(LLMAnalysis.document_tone == filter_type)
+                
+        if filter_year:
+            base_query = base_query.join(Document.llm_analysis, isouter=True)\
+                .filter(LLMAnalysis.election_year == filter_year)
+                
+        if filter_location:
+            base_query = base_query.join(Document.design_elements, isouter=True)\
+                .filter(DesignElement.geographic_location.ilike(f'%{filter_location}%'))
+        
+        # Count total results
+        total_count = base_query.count()
             
-        # Apply sorting
+        # Apply sorting - unchanged
         if sort_by == 'filename':
             if sort_direction == 'desc':
                 base_query = base_query.order_by(Document.filename.desc())
@@ -268,63 +281,23 @@ def search_documents():
             else:
                 base_query = base_query.order_by(Document.upload_date)
         
-        # Handle scenario when empty results
-        if total_count == 0:
-            # If no results with search query, show recent documents instead
-            if query:
-                current_app.logger.info(f"No results for '{query}', returning empty result set")
-                documents = []
-                pagination = {
-                    'page': page,
-                    'per_page': per_page,
-                    'total': 0,
-                    'pages': 0,
-                    'has_prev': False,
-                    'has_next': False
-                }
-            else:
-                # For empty search query, show most recent documents
-                current_app.logger.info("Empty query, showing recent documents")
-                recent_docs = Document.query.order_by(Document.upload_date.desc()).limit(per_page).all()
-                documents = recent_docs
-                pagination = {
-                    'page': 1,
-                    'per_page': per_page,
-                    'total': len(recent_docs),
-                    'pages': 1,
-                    'has_prev': False,
-                    'has_next': False
-                }
-        else:
-            # Execute query with pagination
-            try:
-                paginated_result = base_query.paginate(page=page, per_page=per_page, error_out=False)
-                documents = paginated_result.items
-                
-                # Log pagination results
-                current_app.logger.info(f"Pagination results: page={paginated_result.page}, " +
-                                        f"pages={paginated_result.pages}, items={len(documents)}")
-                
-                # Create pagination object
-                pagination = {
-                    'page': paginated_result.page,
-                    'per_page': per_page,
-                    'total': paginated_result.total,
-                    'pages': paginated_result.pages,
-                    'has_prev': paginated_result.has_prev,
-                    'has_next': paginated_result.has_next,
-                    'prev_page': paginated_result.prev_num if paginated_result.has_prev else None,
-                    'next_page': paginated_result.next_num if paginated_result.has_next else None
-                }
-            except Exception as e:
-                current_app.logger.error(f"Error during pagination: {str(e)}")
-                documents = []
-                pagination = {
-                    'page': page, 'per_page': per_page, 'total': 0, 'pages': 0,
-                    'has_prev': False, 'has_next': False, 'prev_page': None, 'next_page': None
-                }
+        # Execute query with pagination - unchanged
+        paginated_result = base_query.paginate(page=page, per_page=per_page, error_out=False)
+        documents = paginated_result.items
         
-        # Format results
+        # Create pagination object - unchanged
+        pagination = {
+            'page': paginated_result.page,
+            'per_page': per_page,
+            'total': paginated_result.total,
+            'pages': paginated_result.pages,
+            'has_prev': paginated_result.has_prev,
+            'has_next': paginated_result.has_next,
+            'prev_page': paginated_result.prev_num if paginated_result.has_prev else None,
+            'next_page': paginated_result.next_num if paginated_result.has_next else None
+        }
+        
+        # Format results - Updated to include new fields
         results = []
         for doc in documents:
             # Get preview if possible
@@ -334,17 +307,34 @@ def search_documents():
             except Exception as e:
                 current_app.logger.error(f"Preview generation failed for {doc.filename}: {str(e)}")
             
-            # Safely get document attributes
+            # Safely get document attributes with new fields
             try:
                 result = {
                     'id': doc.id,
                     'filename': doc.filename,
                     'upload_date': doc.upload_date.strftime('%Y-%m-%d %H:%M:%S'),
                     'preview': preview,
+                    'status': doc.status,
                     'summary': doc.llm_analysis.summary_description if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
-                    'keywords': []
+                    'keywords': [],
+                    
+                    # Add new fields from models
+                    'document_type': doc.llm_analysis.campaign_type if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
+                    'election_year': doc.llm_analysis.election_year if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
+                    'document_tone': doc.llm_analysis.document_tone if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
+                    
+                    'client': doc.entity.client_name if (hasattr(doc, 'entity') and doc.entity) else '',
+                    'opponent': doc.entity.opponent_name if (hasattr(doc, 'entity') and doc.entity) else '',
+                    
+                    'location': doc.design_elements.geographic_location if (hasattr(doc, 'design_elements') and doc.design_elements) else '',
+                    'target_audience': doc.design_elements.target_audience if (hasattr(doc, 'design_elements') and doc.design_elements) else '',
+                    
+                    'primary_issue': doc.communication_focus.primary_issue if (hasattr(doc, 'communication_focus') and doc.communication_focus) else '',
+                    
+                    'main_message': doc.extracted_text.main_message if (hasattr(doc, 'extracted_text') and doc.extracted_text) else ''
                 }
                 
+                # Add keywords - unchanged
                 if hasattr(doc, 'llm_analysis') and doc.llm_analysis and hasattr(doc.llm_analysis, 'keywords'):
                     result['keywords'] = [
                         {
@@ -357,32 +347,30 @@ def search_documents():
             except Exception as e:
                 current_app.logger.error(f"Error formatting document {doc.id}: {str(e)}")
         
-        # Record search time
+        # Record search time - unchanged
         response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
         record_search_time(response_time)
         
-        # Log performance statistics
-        current_app.logger.info(f"Search completed in {response_time:.2f}ms, returned {len(results)} results")
-        
-        # Return JSON for AJAX requests
+        # Return JSON for AJAX requests - unchanged
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            try:
-                response = jsonify({
-                    'results': results,
-                    'pagination': pagination,
-                    'response_time_ms': response_time,
-                    'query': query
-                })
-                return response
-            except Exception as e:
-                current_app.logger.error(f"Error serializing search results to JSON: {str(e)}")
-                # Return a simplified response with just error
-                return jsonify({
-                    'error': 'Error serializing search results',
-                    'query': query
-                })
+            return jsonify({
+                'results': results,
+                'pagination': pagination,
+                'response_time_ms': response_time,
+                'query': query
+            })
         
-        # Return HTML for direct browser requests
+        # Gather filter options for search form
+        filter_options = {
+            'document_types': db.session.query(LLMAnalysis.document_tone, func.count(LLMAnalysis.document_tone))
+                .group_by(LLMAnalysis.document_tone).all(),
+            'years': db.session.query(LLMAnalysis.election_year, func.count(LLMAnalysis.election_year))
+                .group_by(LLMAnalysis.election_year).all(),
+            'locations': db.session.query(DesignElement.geographic_location, func.count(DesignElement.geographic_location))
+                .group_by(DesignElement.geographic_location).all()
+        }
+        
+        # Return HTML for direct browser requests - updated with new parameters
         return render_template(
             'pages/search.html', 
             documents=results, 
@@ -390,210 +378,20 @@ def search_documents():
             pagination=pagination,
             sort_by=sort_by,
             sort_dir=sort_direction,
+            filter_options=filter_options,
+            filter_type=filter_type,
+            filter_year=filter_year,
+            filter_location=filter_location,
             response_time_ms=round(response_time, 2)
         )
         
     except Exception as e:
-        # Still record the time even for errors
-        response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+        # Error handling - unchanged
+        response_time = (time.time() - start_time) * 1000
         record_search_time(response_time)
         
         current_app.logger.error(f"Search error: {str(e)}", exc_info=True)
         return render_template('pages/search.html', documents=[], query=query, error=str(e))
-
-@main_routes.route('/api/sync-dropbox', methods=['POST'])
-def trigger_dropbox_sync():  # Renamed function to avoid conflict
-    """Manually trigger a Dropbox sync"""
-    try:
-        current_app.logger.info("Manually triggering Dropbox sync")
-        sync_dropbox = get_celery_task('sync_dropbox')
-        result = sync_dropbox.delay()
-        current_app.logger.info(f"Sync task triggered with ID: {result.id}")
-        return jsonify({
-            'status': 'success',
-            'message': 'Sync task triggered',
-            'task_id': result.id
-        })
-    except Exception as e:
-        current_app.logger.error(f"Error triggering sync: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
-
-
-
-@main_routes.route('/api/trigger-sync', methods=['POST'])
-def trigger_sync():
-    """Manually trigger a Dropbox sync"""
-    try:
-        current_app.logger.info("Manually triggering Dropbox sync")
-        
-        # Debug environment variables
-        dropbox_token = os.getenv('DROPBOX_ACCESS_TOKEN', 'NOT_SET')
-        dropbox_folder = os.getenv('DROPBOX_FOLDER_PATH', '')
-        
-        current_app.logger.info(f"DROPBOX_ACCESS_TOKEN exists: {'Yes' if dropbox_token != 'NOT_SET' else 'No'}")
-        current_app.logger.info(f"DROPBOX_FOLDER_PATH value: '{dropbox_folder}'")
-        
-        # Test connection first
-        try:
-            dropbox_service = DropboxService()
-            status = dropbox_service.test_connection()
-            current_app.logger.info(f"Dropbox connection test result: {status}")
-            
-            if not status.get('connected', False):
-                return jsonify({
-                    'status': 'error',
-                    'message': f"Dropbox connection failed: {status.get('error', 'Unknown error')}"
-                }), 500
-                
-            # List root folder contents to debug
-            root_contents = dropbox_service.dbx.files_list_folder("")
-            current_app.logger.info(f"Root folder has {len(root_contents.entries)} entries")
-            
-            # Log the first few entries to check what's there
-            for idx, entry in enumerate(root_contents.entries[:5]):
-                if hasattr(entry, 'name'):
-                    current_app.logger.info(f"Root entry {idx}: {entry.name} (Type: {type(entry).__name__})")
-        
-        except Exception as e:
-            current_app.logger.error(f"Error testing Dropbox connection: {str(e)}")
-            return jsonify({
-                'status': 'error',
-                'message': f"Dropbox connection failed: {str(e)}"
-            }), 500
-        
-        # Trigger sync task
-        result = sync_dropbox.delay()
-        current_app.logger.info(f"Sync task triggered with ID: {result.id}")
-        
-        # Return information for debugging
-        return jsonify({
-            'status': 'success',
-            'message': 'Sync task triggered',
-            'task_id': result.id,
-            'connection_info': status
-        })
-    except Exception as e:
-        current_app.logger.error(f"Error triggering sync: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
-
-
-@main_routes.after_request
-def add_csrf_token(response):
-    """Add CSRF token to response for AJAX requests"""
-    if 'text/html' in response.headers['Content-Type']:
-        response.set_cookie('csrf_token', generate_csrf())
-    return response
-
-
-
-@main_routes.route('/api/sync-status')
-@csrf.exempt
-def get_sync_status():
-    """Get Dropbox sync status"""
-    try:
-        current_app.logger.info("Getting Dropbox sync status")
-        
-        # Debug environment variables
-        dropbox_token = os.getenv('DROPBOX_ACCESS_TOKEN', 'NOT_SET')
-        dropbox_folder = os.getenv('DROPBOX_FOLDER_PATH', '')
-        
-        current_app.logger.info(f"DROPBOX_ACCESS_TOKEN exists: {'Yes' if dropbox_token != 'NOT_SET' else 'No'}")
-        current_app.logger.info(f"DROPBOX_FOLDER_PATH value: '{dropbox_folder}'")
-        
-        dropbox_service = DropboxService()
-        connection_test = dropbox_service.test_connection()
-        
-        # Get most recent successful sync
-        last_sync = DropboxSync.query.order_by(DropboxSync.sync_date.desc()).first()
-        
-        # Get count of files synced in last 24 hours
-        yesterday = datetime.utcnow() - timedelta(days=1)
-        recent_syncs = DropboxSync.query.filter(DropboxSync.sync_date >= yesterday).count()
-        
-        # Get list of files in Dropbox to check what should be synced
-        try:
-            if connection_test.get('connected', False):
-                # Try to list files
-                all_files = []
-                folder_path = dropbox_service.folder_path
-                
-                result = dropbox_service.dbx.files_list_folder(
-                    folder_path,
-                    recursive=True
-                )
-                
-                # Count supported files
-                supported_count = 0
-                for entry in result.entries:
-                    if hasattr(entry, 'path_lower'):
-                        path_lower = entry.path_lower
-                        if (path_lower.endswith('.pdf') or path_lower.endswith('.jpg') or 
-                            path_lower.endswith('.jpeg') or path_lower.endswith('.png')):
-                            supported_count += 1
-                            if len(all_files) < 5:  # Just list a few for debugging
-                                all_files.append(path_lower)
-                
-                current_app.logger.info(f"Found {supported_count} supported files in Dropbox")
-                
-                # Count next batch to process
-                processed_files = {sync.dropbox_file_id for sync in DropboxSync.query.all()}
-                to_process = 0
-                
-                for entry in result.entries:
-                    if hasattr(entry, 'id') and hasattr(entry, 'path_lower'):
-                        if entry.id not in processed_files:
-                            path_lower = entry.path_lower
-                            if (path_lower.endswith('.pdf') or path_lower.endswith('.jpg') or 
-                                path_lower.endswith('.jpeg') or path_lower.endswith('.png')):
-                                to_process += 1
-                
-                current_app.logger.info(f"Found {to_process} files to process in next sync")
-                
-                status_response = {
-                    'last_sync_time': last_sync.sync_date.isoformat() if last_sync else None,
-                    'last_24h_files': recent_syncs,
-                    'last_status': 'SUCCESS' if recent_syncs > 0 else 'NO_ACTIVITY',
-                    'dropbox_connected': connection_test.get('connected', False),
-                    'files_in_dropbox': supported_count,
-                    'files_to_process': to_process,
-                    'connection_info': connection_test,
-                    'sample_files': all_files
-                }
-            else:
-                status_response = {
-                    'last_sync_time': last_sync.sync_date.isoformat() if last_sync else None,
-                    'last_24h_files': recent_syncs,
-                    'last_status': 'CONNECTION_ERROR',
-                    'dropbox_connected': False,
-                    'connection_info': connection_test
-                }
-        except Exception as e:
-            current_app.logger.error(f"Error getting Dropbox file list: {str(e)}")
-            status_response = {
-                'last_sync_time': last_sync.sync_date.isoformat() if last_sync else None,
-                'last_24h_files': recent_syncs,
-                'last_status': 'ERROR',
-                'dropbox_connected': connection_test.get('connected', False),
-                'error': str(e)
-            }
-            
-        return jsonify(status_response)
-    except Exception as e:
-        current_app.logger.error(f"Error getting sync status: {str(e)}")
-        return jsonify({
-            'error': 'Failed to get sync status',
-            'last_sync_time': None,
-            'last_24h_files': 0,
-            'last_status': 'ERROR',
-            'dropbox_connected': False,
-            'error_details': str(e)
-        })
 
 
 
