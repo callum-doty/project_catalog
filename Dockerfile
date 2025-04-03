@@ -7,6 +7,9 @@ ENV PYTHONPATH=/app \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+# Create the app directory first
+RUN mkdir -p /app
+
 # Install system dependencies AS ROOT
 RUN apt-get update && apt-get install -y \
     poppler-utils \
@@ -30,18 +33,25 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy requirements file
+COPY requirements.txt /app/
+
 # Install Python packages AS ROOT
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-
+# Create a non-root user
 RUN useradd -m appuser && chown -R appuser /app
+
+# Switch to non-root user
 USER appuser
 
+# Copy application code
+COPY --chown=appuser . /app/
 
-COPY --chown=appuser . .
+# Set working directory
+WORKDIR /app
 
-
+# Create necessary directories
 RUN mkdir -p uploads logs
 
 EXPOSE 5000
