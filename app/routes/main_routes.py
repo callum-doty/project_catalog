@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 from app.services.storage_service import MinIOStorage
 from app.extensions import db
-from app.models.models import Document, LLMAnalysis, LLMKeyword, Classification, DesignElement, ExtractedText, DropboxSync   
+from app.models.models import Document, LLMAnalysis, LLMKeyword, Classification, DesignElement, ExtractedText, DropboxSync, Entity, CommunicationFocus
 from sqlalchemy import or_, func, desc, case, extract
 from app.services.preview_service import PreviewService
 from app.services.dropbox_service import DropboxService
@@ -370,7 +370,7 @@ def search_documents():
                 .group_by(DesignElement.geographic_location).all()
         }
         
-        # Return HTML for direct browser requests - updated with new parameters
+     
         return render_template(
             'pages/search.html', 
             documents=results, 
@@ -382,7 +382,8 @@ def search_documents():
             filter_type=filter_type,
             filter_year=filter_year,
             filter_location=filter_location,
-            response_time_ms=round(response_time, 2)
+            response_time_ms=round(response_time, 2),
+            taxonomy_facets={'primary_categories': [], 'subcategories': []}
         )
         
     except Exception as e:

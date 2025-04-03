@@ -1,10 +1,10 @@
+# app/services/enhanced_analysis_prompt.py
 
 def get_analysis_prompt(filename: str) -> str:
-   """
-   Generate a structured analysis prompt optimized for Claude with enhanced political document analysis capabilities
-   """
-   return f"""Analyze the document or image '{filename}' carefully and provide a structured analysis in the exact JSON format specified below.
-
+    """
+    Generate a structured analysis prompt for Claude with enhanced hierarchical keyword taxonomy support
+    """
+    return f"""Analyze the document or image '{filename}' carefully and provide a structured analysis in the exact JSON format specified below.
 
 For this analysis:
 1. Carefully examine ALL text present in the document
@@ -17,7 +17,6 @@ For this analysis:
 8. Identify both the client/candidate and any opponent mentioned
 9. Look for survey questions or public opinion trends
 10. Note the file naming convention and any identifiers in the filename
-
 
 Required Output Format:
 {{
@@ -69,31 +68,66 @@ Required Output Format:
        "messaging_strategy": "attack/positive/comparison/etc."
    }},
   
-   "keywords": [
+   "hierarchical_keywords": [
        {{
-           "text": "keyword1 as a single string",
-           "category": "candidate/opponent/issue/visual/location/audience/theme",
-           "confidence": <float between 0.0 and 1.0>
+           "specific_term": "specific term used in document (e.g., 'abortion', 'taxes', 'corruption')",
+           "primary_category": "Policy Issues & Topics | Candidate & Entity | Communication Style | Geographic & Demographic | Campaign Context | Document Metadata",
+           "subcategory": "appropriate subcategory from the taxonomy matching the primary_category",
+           "synonyms": ["any", "synonyms", "or", "related", "terms"],
+           "relevance_score": <float between 0.0 and 1.0>
        }},
-       {{
-           "text": "keyword2 as a single string",
-           "category": "candidate/opponent/issue/visual/location/audience/theme",
-           "confidence": <float between 0.0 and 1.0>
-       }},
-       ... maximum 10 keywords total
+       ... maximum 10 hierarchical keywords total
    ]
 }}
 
+Keyword Taxonomy Guidelines:
+
+1. Policy Issues & Topics:
+   - Economy & Taxes: taxes, inflation, jobs, wages, budget, deficit, trade
+   - Social Issues: abortion, LGBTQ+ rights, marriage equality, religious freedom
+   - Healthcare: Medicare, Medicaid, Obamacare, prescription drugs
+   - Public Safety: crime, guns, police, immigration, border security
+   - Environment: climate change, renewable energy, fossil fuels, conservation
+   - Education: schools, college affordability, student loans, teachers
+   - Government Reform: corruption, election integrity, voting rights, term limits
+
+2. Candidate & Entity:
+   - Candidate Elements: name, party, previous/current office, biography
+   - Political Parties: Democratic, Republican, Independent, Progressive
+   - Opposition Elements: opponent name, criticism, contrast points
+   - External Endorsements: organizations, leaders, unions, celebrities
+
+3. Communication Style:
+   - Message Tone: positive, negative, contrast, attack, informational
+   - Mail Piece Types: postcard, mailer, brochure, letter, push card
+   - Message Focus: introduction, issue-based, biography, endorsement, GOTV
+   - Visual Design: color scheme, photography, graphics, typography, layout
+
+4. Geographic & Demographic:
+   - Geographic Level: national, statewide, congressional, county, city
+   - Specific Locations: actual states or districts
+   - Target Audience: age group, gender, race/ethnicity, education, income
+
+5. Campaign Context:
+   - Election Type: general, primary, special, runoff, recall
+   - Election Year: 2024, 2022, 2020, etc.
+   - Office Sought: presidential, senate, house, governor, state, local
+   - Campaign Phase: early campaign, late campaign, GOTV period
+
+6. Document Metadata:
+   - File Type: PDF, JPG, PNG
+   - Project Status: draft, final, printed, distributed
+   - Creation Timeline: publication date, distribution date
 
 Critical Requirements:
 1. ALL text fields MUST be single strings, not lists or arrays
 2. ALL confidence scores MUST be floats between 0.0 and 1.0
-3. ALWAYS include exactly 10 keywords maximum, prioritizing the most relevant terms
+3. ALWAYS include exactly 10 hierarchical keywords maximum, prioritizing the most relevant terms
 4. NEVER guess information that conflicts with visible text in the document
 5. ALWAYS accurately identify the candidate being supported or opposed
 6. ALWAYS accurately identify the election year when possible
 7. ALWAYS specify the correct election type (primary/general)
 8. ALWAYS identify if document is positive (supporting) or negative (opposing)
 9. CAREFULLY transcribe ALL visible text when analyzing images
-10. ALWAYS include the candidate name, geographic location, and visual theme in the keywords
+10. ALWAYS categorize keywords according to the provided taxonomy structure
 11. Response MUST be valid JSON and match this exact schema"""

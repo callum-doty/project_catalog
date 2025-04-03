@@ -145,3 +145,4 @@ class DropboxSync(db.Model):
    sync_date = db.Column(db.DateTime(timezone=True))
    status = db.Column(db.String(50), default='SYNCED')
 
+
