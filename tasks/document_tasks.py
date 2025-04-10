@@ -213,6 +213,14 @@ def store_analysis_results(document_id: int, response: dict):
             logger.info(f"Stored communication focus for document {document_id}")
         except Exception as e:
             logger.error(f"Failed to store communication focus: {str(e)}")
+
+        try:
+            hierarchical_keywords = parser.parse_hierarchical_keywords(response, document_id)
+            for keyword in hierarchical_keywords:
+                db.session.add(keyword)
+            logger.info(f"Stored {len(hierarchical_keywords)} hierarchical keywords for document {document_id}")
+        except Exception as e:
+            logger.error(f"Error processing hierarchical keywords: {str(e)}")
         
         # Commit all changes to database
         db.session.commit()

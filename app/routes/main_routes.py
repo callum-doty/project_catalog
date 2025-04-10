@@ -222,19 +222,31 @@ def search_documents():
     sort_by = request.args.get('sort_by', 'upload_date')
     sort_direction = request.args.get('sort_dir', 'desc')
     
-    # New filter parameters
+    # Filter parameters
     filter_type = request.args.get('filter_type', '')
     filter_year = request.args.get('filter_year', '')
     filter_location = request.args.get('filter_location', '')
     
+    # New taxonomy filter parameters
+    primary_category = request.args.get('primary_category', '')
+    subcategory = request.args.get('subcategory', '')
+    
     start_time = time.time()  # Start timing
     
     try:
-        # Base query - Updated with new joins
+        # Base query
         base_query = Document.query
+        taxonomy_terms = []
         
         # Apply search filters if query is provided
         if query:
+            # Find matching taxonomy terms first
+            from app.models.keyword_models import KeywordTaxonomy, KeywordSynonym, DocumentKeyword
+            taxonomy_terms = KeywordTaxonomy.query.filter(
+                KeywordTaxonomy.term.ilike(f'%{query}%')
+            ).limit(5).all()  # Get top 5 matching terms
+            
+            # Regular search query with joins
             base_query = base_query.outerjoin(Document.llm_analysis)\
                 .outerjoin(LLMKeyword, LLMAnalysis.id == LLMKeyword.llm_analysis_id)\
                 .outerjoin(Document.entity)\
@@ -253,7 +265,7 @@ def search_documents():
                     )
                 ).distinct()
         
-        # Apply filters from advanced search form
+        # Apply standard filters
         if filter_type:
             base_query = base_query.join(Document.llm_analysis)\
                 .filter(LLMAnalysis.document_tone == filter_type)
@@ -266,10 +278,26 @@ def search_documents():
             base_query = base_query.join(Document.design_elements, isouter=True)\
                 .filter(DesignElement.geographic_location.ilike(f'%{filter_location}%'))
         
+        # Apply taxonomy filters if provided
+        if primary_category:
+            # Join with document_keywords and keyword_taxonomy
+            from app.models.keyword_models import DocumentKeyword, KeywordTaxonomy
+            base_query = base_query.join(
+                DocumentKeyword, Document.id == DocumentKeyword.document_id
+            ).join(
+                KeywordTaxonomy, DocumentKeyword.taxonomy_id == KeywordTaxonomy.id
+            ).filter(
+                KeywordTaxonomy.primary_category == primary_category
+            )
+            
+            # Apply subcategory filter if provided
+            if subcategory:
+                base_query = base_query.filter(KeywordTaxonomy.subcategory == subcategory)
+        
         # Count total results
         total_count = base_query.count()
             
-        # Apply sorting - unchanged
+        # Apply sorting
         if sort_by == 'filename':
             if sort_direction == 'desc':
                 base_query = base_query.order_by(Document.filename.desc())
@@ -281,11 +309,11 @@ def search_documents():
             else:
                 base_query = base_query.order_by(Document.upload_date)
         
-        # Execute query with pagination - unchanged
+        # Execute query with pagination
         paginated_result = base_query.paginate(page=page, per_page=per_page, error_out=False)
         documents = paginated_result.items
         
-        # Create pagination object - unchanged
+        # Create pagination object
         pagination = {
             'page': paginated_result.page,
             'per_page': per_page,
@@ -297,7 +325,7 @@ def search_documents():
             'next_page': paginated_result.next_num if paginated_result.has_next else None
         }
         
-        # Format results - Updated to include new fields
+        # Format results
         results = []
         for doc in documents:
             # Get preview if possible
@@ -307,57 +335,63 @@ def search_documents():
             except Exception as e:
                 current_app.logger.error(f"Preview generation failed for {doc.filename}: {str(e)}")
             
-            # Safely get document attributes with new fields
-            try:
-                result = {
-                    'id': doc.id,
-                    'filename': doc.filename,
-                    'upload_date': doc.upload_date.strftime('%Y-%m-%d %H:%M:%S'),
-                    'preview': preview,
-                    'status': doc.status,
-                    'summary': doc.llm_analysis.summary_description if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
-                    'keywords': [],
-                    
-                    # Add new fields from models
-                    'document_type': doc.llm_analysis.campaign_type if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
-                    'election_year': doc.llm_analysis.election_year if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
-                    'document_tone': doc.llm_analysis.document_tone if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
-                    
-                    'client': doc.entity.client_name if (hasattr(doc, 'entity') and doc.entity) else '',
-                    'opponent': doc.entity.opponent_name if (hasattr(doc, 'entity') and doc.entity) else '',
-                    
-                    'location': doc.design_elements.geographic_location if (hasattr(doc, 'design_elements') and doc.design_elements) else '',
-                    'target_audience': doc.design_elements.target_audience if (hasattr(doc, 'design_elements') and doc.design_elements) else '',
-                    
-                    'primary_issue': doc.communication_focus.primary_issue if (hasattr(doc, 'communication_focus') and doc.communication_focus) else '',
-                    
-                    'main_message': doc.extracted_text.main_message if (hasattr(doc, 'extracted_text') and doc.extracted_text) else ''
-                }
+            # Build formatted document
+            result = {
+                'id': doc.id,
+                'filename': doc.filename,
+                'upload_date': doc.upload_date.strftime('%Y-%m-%d %H:%M:%S'),
+                'preview': preview,
+                'status': doc.status,
+                'summary': doc.llm_analysis.summary_description if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
+                'keywords': [],
                 
-                # Add keywords - unchanged
-                if hasattr(doc, 'llm_analysis') and doc.llm_analysis and hasattr(doc.llm_analysis, 'keywords'):
-                    result['keywords'] = [
-                        {
-                            'text': kw.keyword,
-                            'category': kw.category
-                        } for kw in doc.llm_analysis.keywords if hasattr(kw, 'keyword')
-                    ]
+                # Add new fields from models
+                'document_type': doc.llm_analysis.campaign_type if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
+                'election_year': doc.llm_analysis.election_year if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
+                'document_tone': doc.llm_analysis.document_tone if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
                 
-                results.append(result)
-            except Exception as e:
-                current_app.logger.error(f"Error formatting document {doc.id}: {str(e)}")
+                'client': doc.entity.client_name if (hasattr(doc, 'entity') and doc.entity) else '',
+                'opponent': doc.entity.opponent_name if (hasattr(doc, 'entity') and doc.entity) else '',
+                
+                'location': doc.design_elements.geographic_location if (hasattr(doc, 'design_elements') and doc.design_elements) else '',
+                'target_audience': doc.design_elements.target_audience if (hasattr(doc, 'design_elements') and doc.design_elements) else '',
+                
+                'primary_issue': doc.communication_focus.primary_issue if (hasattr(doc, 'communication_focus') and doc.communication_focus) else '',
+                
+                'main_message': doc.extracted_text.main_message if (hasattr(doc, 'extracted_text') and doc.extracted_text) else '',
+                
+                # Add hierarchical keywords for each document
+                'hierarchical_keywords': get_document_hierarchical_keywords(doc.id)
+            }
+            
+            # Add keywords
+            if hasattr(doc, 'llm_analysis') and doc.llm_analysis and hasattr(doc.llm_analysis, 'keywords'):
+                result['keywords'] = [
+                    {
+                        'text': kw.keyword,
+                        'category': kw.category
+                    } for kw in doc.llm_analysis.keywords if hasattr(kw, 'keyword')
+                ]
+            
+            results.append(result)
         
-        # Record search time - unchanged
+        # Generate taxonomy facets for sidebar
+        from app.models.keyword_models import KeywordTaxonomy
+        taxonomy_facets = generate_taxonomy_facets(primary_category, subcategory)
+        
+        # Record search time
         response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
         record_search_time(response_time)
         
-        # Return JSON for AJAX requests - unchanged
+        # Return JSON for AJAX requests
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify({
                 'results': results,
                 'pagination': pagination,
                 'response_time_ms': response_time,
-                'query': query
+                'query': query,
+                'taxonomy_facets': taxonomy_facets,
+                'matching_terms': [term.to_dict() for term in taxonomy_terms] if taxonomy_terms else []
             })
         
         # Gather filter options for search form
@@ -370,7 +404,6 @@ def search_documents():
                 .group_by(DesignElement.geographic_location).all()
         }
         
-     
         return render_template(
             'pages/search.html', 
             documents=results, 
@@ -382,17 +415,102 @@ def search_documents():
             filter_type=filter_type,
             filter_year=filter_year,
             filter_location=filter_location,
+            primary_category=primary_category,
+            subcategory=subcategory,
             response_time_ms=round(response_time, 2),
-            taxonomy_facets={'primary_categories': [], 'subcategories': []}
+            taxonomy_facets=taxonomy_facets,
+            matching_terms=taxonomy_terms
         )
         
     except Exception as e:
-        # Error handling - unchanged
+        # Error handling
         response_time = (time.time() - start_time) * 1000
         record_search_time(response_time)
         
         current_app.logger.error(f"Search error: {str(e)}", exc_info=True)
         return render_template('pages/search.html', documents=[], query=query, error=str(e))
+
+
+# Helper function to get hierarchical keywords for a document
+def get_document_hierarchical_keywords(document_id):
+    """Get hierarchical keywords for a document"""
+    try:
+        from app.models.keyword_models import DocumentKeyword, KeywordTaxonomy
+        
+        keywords = db.session.query(
+            DocumentKeyword, KeywordTaxonomy
+        ).join(
+            KeywordTaxonomy, DocumentKeyword.taxonomy_id == KeywordTaxonomy.id
+        ).filter(
+            DocumentKeyword.document_id == document_id
+        ).all()
+        
+        # Format keywords for display
+        result = []
+        for doc_kw, taxonomy in keywords:
+            result.append({
+                'id': taxonomy.id,
+                'term': taxonomy.term,
+                'primary_category': taxonomy.primary_category,
+                'subcategory': taxonomy.subcategory,
+                'relevance_score': doc_kw.relevance_score
+            })
+        
+        return result
+    except Exception as e:
+        current_app.logger.error(f"Error getting hierarchical keywords: {str(e)}")
+        return []
+
+# Generate taxonomy facets for sidebar
+def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None):
+    """Generate taxonomy facets for sidebar filtering"""
+    try:
+        from app.models.keyword_models import KeywordTaxonomy, DocumentKeyword
+        
+        # Get primary categories with counts
+        primary_categories = db.session.query(
+            KeywordTaxonomy.primary_category,
+            func.count(KeywordTaxonomy.id.distinct()).label('count')
+        ).join(
+            DocumentKeyword, KeywordTaxonomy.id == DocumentKeyword.taxonomy_id
+        ).group_by(
+            KeywordTaxonomy.primary_category
+        ).order_by(
+            KeywordTaxonomy.primary_category
+        ).all()
+        
+        # If a primary category is selected, get subcategories
+        subcategories = []
+        if selected_primary:
+            subcategories = db.session.query(
+                KeywordTaxonomy.subcategory,
+                func.count(KeywordTaxonomy.id.distinct()).label('count')
+            ).filter(
+                KeywordTaxonomy.primary_category == selected_primary
+            ).join(
+                DocumentKeyword, KeywordTaxonomy.id == DocumentKeyword.taxonomy_id
+            ).group_by(
+                KeywordTaxonomy.subcategory
+            ).order_by(
+                KeywordTaxonomy.subcategory
+            ).all()
+        
+        # Format results
+        result = {
+            'primary_categories': [
+                {'name': cat, 'count': count, 'selected': cat == selected_primary}
+                for cat, count in primary_categories
+            ],
+            'subcategories': [
+                {'name': subcat, 'count': count, 'selected': subcat == selected_subcategory}
+                for subcat, count in subcategories
+            ] if selected_primary else []
+        }
+        
+        return result
+    except Exception as e:
+        current_app.logger.error(f"Error generating taxonomy facets: {str(e)}")
+        return {'primary_categories': [], 'subcategories': []}
 
 
 
@@ -779,3 +897,5 @@ def execute_sync():
             'status': 'error',
             'message': str(e)
         }), 500
+
+
