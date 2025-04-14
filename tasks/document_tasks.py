@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from app.extensions import db
 from app.services.storage_service import MinIOStorage
 import logging
+from app.extensions import cache
 
 
 
@@ -83,6 +84,21 @@ def test_document_processing(self, document_id):
     except Exception as e:
         logger.error(f"Error in test processing: {str(e)}", exc_info=True)
         raise
+def invalidate_document_cache(document_id):
+    """Invalidate all cache related to a specific document"""
+    # Invalidate hierarchical keywords cache
+    cache.delete_memoized(get_document_hierarchical_keywords, document_id)
+    
+    # Invalidate document preview cache
+    document = Document.query.get(document_id)
+    if document:
+        cache.delete_memoized(preview_service.get_preview, document.filename)
+    
+    # Force regeneration of taxonomy facets
+    cache.delete_memoized(generate_taxonomy_facets)
+    
+    # Clear search cache (this is a broader invalidation)
+    cache.clear()
 
 
 @celery_app.task(bind=True, base=DocumentProcessorTask, name='tasks.process_document')
@@ -273,3 +289,4 @@ def recover_pending_documents():
                 logger.error(f"Error recovering document {doc.id}: {str(e)}")
         
         return f"Processed {len(stuck_documents)} stuck documents"
+

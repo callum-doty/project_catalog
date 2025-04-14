@@ -4,6 +4,7 @@ from flask import Blueprint, render_template, request, jsonify, current_app, fla
 from sqlalchemy import or_, func, desc, asc, case, text
 from app.models.models import Document, LLMAnalysis, ExtractedText, Entity, DesignElement, CommunicationFocus
 from app.models.keyword_models import KeywordTaxonomy, DocumentKeyword, KeywordSynonym, SearchFeedback
+from app.routes.search_routes import get_document_hierarchical_keywords
 from app.extensions import db
 from app.services.preview_service import PreviewService
 import time
@@ -227,22 +228,25 @@ def format_documents_for_display(documents):
     
     return formatted_docs
 
-def get_document_hierarchical_keywords(document_id):
-    """Get all hierarchical keywords for a document"""
+def get_document_hierarchical_keywords_bulk(document_ids):
+    """Efficiently get hierarchical keywords for multiple documents at once"""
     try:
-        # Query document keywords with taxonomy info
-        keywords = db.session.query(
+        from app.models.keyword_models import DocumentKeyword, KeywordTaxonomy
+        
+        # Single query to get all keywords for all documents
+        keywords_data = db.session.query(
             DocumentKeyword, KeywordTaxonomy
         ).join(
             KeywordTaxonomy, DocumentKeyword.taxonomy_id == KeywordTaxonomy.id
         ).filter(
-            DocumentKeyword.document_id == document_id
+            DocumentKeyword.document_id.in_(document_ids)
         ).all()
         
-        # Format for display
-        formatted_keywords = []
-        for doc_kw, taxonomy in keywords:
-            formatted_keywords.append({
+        # Organize by document ID
+        results = {doc_id: [] for doc_id in document_ids}
+        
+        for doc_kw, taxonomy in keywords_data:
+            results[doc_kw.document_id].append({
                 'id': taxonomy.id,
                 'term': taxonomy.term,
                 'primary_category': taxonomy.primary_category,
@@ -250,18 +254,29 @@ def get_document_hierarchical_keywords(document_id):
                 'relevance_score': doc_kw.relevance_score
             })
         
-        return formatted_keywords
+        return results
     except Exception as e:
-        logger.error(f"Error fetching hierarchical keywords for doc {document_id}: {str(e)}")
-        return []
+        current_app.logger.error(f"Error getting hierarchical keywords: {str(e)}")
+        return {doc_id: [] for doc_id in document_ids}
 
 def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None):
-    """Generate taxonomy facets for filtering"""
+    """Generate taxonomy facets with more efficient queries"""
     try:
-        # Get primary categories with counts
+        from app.models.keyword_models import KeywordTaxonomy, DocumentKeyword
+        
+        # Use count queries with joins optimized by added indexes
+        
+        # For primary categories, add a CTE for used taxonomies
+        used_taxonomies = db.session.query(
+            DocumentKeyword.taxonomy_id
+        ).distinct().subquery()
+        
+        # Get primary categories with counts, only for taxonomies actually in use
         primary_categories = db.session.query(
             KeywordTaxonomy.primary_category,
             func.count(KeywordTaxonomy.id.distinct()).label('count')
+        ).join(
+            used_taxonomies, KeywordTaxonomy.id == used_taxonomies.c.taxonomy_id
         ).group_by(
             KeywordTaxonomy.primary_category
         ).order_by(
@@ -276,6 +291,8 @@ def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None):
                 func.count(KeywordTaxonomy.id.distinct()).label('count')
             ).filter(
                 KeywordTaxonomy.primary_category == selected_primary
+            ).join(
+                used_taxonomies, KeywordTaxonomy.id == used_taxonomies.c.taxonomy_id
             ).group_by(
                 KeywordTaxonomy.subcategory
             ).order_by(
@@ -296,7 +313,7 @@ def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None):
         
         return result
     except Exception as e:
-        logger.error(f"Error generating taxonomy facets: {str(e)}")
+        current_app.logger.error(f"Error generating taxonomy facets: {str(e)}")
         return {'primary_categories': [], 'subcategories': []}
 
 @search_routes.route('/api/search-feedback', methods=['POST'])

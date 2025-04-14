@@ -10,6 +10,7 @@ import logging
 import tempfile
 from werkzeug.utils import secure_filename
 import traceback
+from app.extensions import cache, db
 
 class PreviewService:
     def __init__(self):
@@ -17,6 +18,8 @@ class PreviewService:
         self.supported_images = ['.jpg', '.jpeg', '.png', '.gif']
         self.supported_pdfs = ['.pdf']
         self.logger = logging.getLogger(__name__)
+    
+    @cache.memoize(timeout=3600)
         
     def get_preview(self, filename):
         """Generate preview for different file types"""

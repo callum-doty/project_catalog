@@ -3,10 +3,12 @@
 from flask import Blueprint, render_template, request, session, flash, redirect, url_for, jsonify, current_app
 from werkzeug.utils import secure_filename
 import os
+from sqlalchemy.orm import joinedload
 from datetime import datetime
 from app.services.storage_service import MinIOStorage
 from app.extensions import db
 from app.models.models import Document, LLMAnalysis, LLMKeyword, Classification, DesignElement, ExtractedText, DropboxSync, Entity, CommunicationFocus
+from app.models.keyword_models import KeywordTaxonomy, KeywordSynonym, DocumentKeyword
 from sqlalchemy import or_, func, desc, case, extract
 from app.services.preview_service import PreviewService
 from app.services.dropbox_service import DropboxService
@@ -20,14 +22,17 @@ from statistics import mean
 from tasks.document_tasks import process_document
 from tasks.dropbox_tasks import sync_dropbox
 from functools import wraps
+from app.extensions import cache
+from app.services.document_service import get_document_count, get_document_counts_by_status
+from flask_caching import Cache
+
+
 
 main_routes = Blueprint('main_routes', __name__)
 storage = MinIOStorage()
 preview_service = PreviewService()
 search_times = []
 MAX_SEARCH_TIMES = 100
-
-
 
 
 def check_password(password):
@@ -111,14 +116,16 @@ def record_search_time(response_time):
         search_times = search_times[-MAX_SEARCH_TIMES:]
 
 
-
-
 @main_routes.route('/')
 def index():
     # Redirect to the search page instead of showing the index page
     return redirect(url_for('main_routes.search_documents'))
 
-# The original index route is kept as a separate route for reference
+@main_routes.route('/dashboard')
+def dashboard():
+    document_counts = get_document_counts_by_status()
+    return render_template('dashboard.html', counts=document_counts)
+
 @main_routes.route('/home')
 def home():
     try:
@@ -211,10 +218,21 @@ def upload_file():
         flash(f'Error uploading file: {str(e)}', 'error')
         return redirect(url_for('main_routes.search_documents'))
 
-# Update to main_routes.py - search_documents function
+
+
+def cached_view(timeout=60, query_string=False):
+    def decorator(fn):
+        def wrapper(*args, **kwargs):
+            cache = current_app.extensions["cache"].get(Cache)
+            return cache.cached(timeout=timeout, query_string=query_string)(fn)(*args, **kwargs)
+        return wrapper
+    return decorator
+
 
 @main_routes.route('/search')
+@cache.cached(timeout=60, query_string=True)
 def search_documents():
+    """Search implementation with full-text search capability"""
     # Get search parameters from request
     query = request.args.get('q', '')
     page = request.args.get('page', 1, type=int)
@@ -227,102 +245,163 @@ def search_documents():
     filter_year = request.args.get('filter_year', '')
     filter_location = request.args.get('filter_location', '')
     
-    # New taxonomy filter parameters
+    # Taxonomy filter parameters
     primary_category = request.args.get('primary_category', '')
     subcategory = request.args.get('subcategory', '')
     
     start_time = time.time()  # Start timing
     
+    # Initialize variables that might be used in the error handler
+    taxonomy_facets = {'primary_categories': [], 'subcategories': []}
+    taxonomy_terms = []
+    
     try:
-        # Base query
-        base_query = Document.query
-        taxonomy_terms = []
+        # Initialize base query
+        document_ids_query = db.session.query(Document.id)
         
-        # Apply search filters if query is provided
+        # Apply full-text search if query is provided
         if query:
-            # Find matching taxonomy terms first
-            from app.models.keyword_models import KeywordTaxonomy, KeywordSynonym, DocumentKeyword
+            # Try to find matching taxonomy terms
             taxonomy_terms = KeywordTaxonomy.query.filter(
                 KeywordTaxonomy.term.ilike(f'%{query}%')
-            ).limit(5).all()  # Get top 5 matching terms
+            ).limit(5).all()
             
-            # Regular search query with joins
-            base_query = base_query.outerjoin(Document.llm_analysis)\
-                .outerjoin(LLMKeyword, LLMAnalysis.id == LLMKeyword.llm_analysis_id)\
-                .outerjoin(Document.entity)\
-                .outerjoin(Document.communication_focus)\
-                .outerjoin(Document.extracted_text)\
-                .filter(
+            # Full-text search using search vectors if they exist
+            # Check if the search_vector column exists
+            has_search_vector = False
+            try:
+                Document.search_vector
+                has_search_vector = True
+            except AttributeError:
+                # Fallback to traditional search if search_vector doesn't exist
+                pass
+                
+            if has_search_vector:
+                # Convert search query to tsquery format
+                tsquery = func.plainto_tsquery('english', query)
+                
+                # Subquery for documents matching with full-text search
+                doc_matches = db.session.query(Document.id).filter(
+                    Document.search_vector.op('@@')(tsquery)
+                ).subquery()
+                
+                # Subquery for LLM Analysis matches
+                llm_matches = db.session.query(LLMAnalysis.document_id).filter(
+                    LLMAnalysis.search_vector.op('@@')(tsquery)
+                ).subquery()
+                
+                # Subquery for Extracted Text matches
+                text_matches = db.session.query(ExtractedText.document_id).filter(
+                    ExtractedText.search_vector.op('@@')(tsquery)
+                ).subquery()
+                
+                # Combine all matches
+                document_ids_query = document_ids_query.filter(
+                    or_(
+                        Document.id.in_(doc_matches),
+                        Document.id.in_(llm_matches),
+                        Document.id.in_(text_matches)
+                    )
+                )
+            else:
+                # Fallback to traditional search with ILIKE
+                document_ids_query = document_ids_query.outerjoin(
+                    LLMAnalysis, Document.id == LLMAnalysis.document_id
+                ).outerjoin(
+                    LLMKeyword, LLMAnalysis.id == LLMKeyword.llm_analysis_id
+                ).outerjoin(
+                    ExtractedText, Document.id == ExtractedText.document_id
+                ).filter(
                     or_(
                         Document.filename.ilike(f'%{query}%'),
                         LLMAnalysis.summary_description.ilike(f'%{query}%'),
                         LLMKeyword.keyword.ilike(f'%{query}%'),
-                        Entity.client_name.ilike(f'%{query}%'),
-                        Entity.opponent_name.ilike(f'%{query}%'),
-                        CommunicationFocus.primary_issue.ilike(f'%{query}%'),
-                        ExtractedText.main_message.ilike(f'%{query}%'),
-                        ExtractedText.supporting_text.ilike(f'%{query}%')
+                        ExtractedText.main_message.ilike(f'%{query}%')
                     )
-                ).distinct()
+                )
         
-        # Apply standard filters
+        # Apply other filters
         if filter_type:
-            base_query = base_query.join(Document.llm_analysis)\
-                .filter(LLMAnalysis.document_tone == filter_type)
+            type_matches = db.session.query(LLMAnalysis.document_id).filter(
+                LLMAnalysis.document_tone == filter_type
+            ).subquery()
+            document_ids_query = document_ids_query.filter(Document.id.in_(type_matches))
                 
         if filter_year:
-            base_query = base_query.join(Document.llm_analysis, isouter=True)\
-                .filter(LLMAnalysis.election_year == filter_year)
+            year_matches = db.session.query(LLMAnalysis.document_id).filter(
+                LLMAnalysis.election_year == filter_year
+            ).subquery()
+            document_ids_query = document_ids_query.filter(Document.id.in_(year_matches))
                 
         if filter_location:
-            base_query = base_query.join(Document.design_elements, isouter=True)\
-                .filter(DesignElement.geographic_location.ilike(f'%{filter_location}%'))
+            loc_matches = db.session.query(DesignElement.document_id).filter(
+                func.lower(DesignElement.geographic_location).like(f"%{filter_location.lower()}%")
+            ).subquery()
+            document_ids_query = document_ids_query.filter(Document.id.in_(loc_matches))
         
-        # Apply taxonomy filters if provided
+        # Apply taxonomy filters
         if primary_category:
-            # Join with document_keywords and keyword_taxonomy
-            from app.models.keyword_models import DocumentKeyword, KeywordTaxonomy
-            base_query = base_query.join(
-                DocumentKeyword, Document.id == DocumentKeyword.document_id
-            ).join(
+            taxonomy_matches = db.session.query(DocumentKeyword.document_id).join(
                 KeywordTaxonomy, DocumentKeyword.taxonomy_id == KeywordTaxonomy.id
             ).filter(
                 KeywordTaxonomy.primary_category == primary_category
             )
             
-            # Apply subcategory filter if provided
             if subcategory:
-                base_query = base_query.filter(KeywordTaxonomy.subcategory == subcategory)
+                taxonomy_matches = taxonomy_matches.filter(
+                    KeywordTaxonomy.subcategory == subcategory
+                )
+                
+            taxonomy_matches = taxonomy_matches.subquery()
+            document_ids_query = document_ids_query.filter(Document.id.in_(taxonomy_matches))
         
-        # Count total results
-        total_count = base_query.count()
-            
-        # Apply sorting
         if sort_by == 'filename':
             if sort_direction == 'desc':
-                base_query = base_query.order_by(Document.filename.desc())
+                document_ids_query = document_ids_query.order_by(Document.filename.desc())
             else:
-                base_query = base_query.order_by(Document.filename)
+                document_ids_query = document_ids_query.order_by(Document.filename)
         else:  # Default to sort by upload date
             if sort_direction == 'desc':
-                base_query = base_query.order_by(Document.upload_date.desc())
+                document_ids_query = document_ids_query.order_by(Document.upload_date.desc())
             else:
-                base_query = base_query.order_by(Document.upload_date)
+                document_ids_query = document_ids_query.order_by(Document.upload_date)
         
-        # Execute query with pagination
-        paginated_result = base_query.paginate(page=page, per_page=per_page, error_out=False)
-        documents = paginated_result.items
+        # Get total count for pagination before applying limit/offset
+        total_count = document_ids_query.count()
+        
+        # Apply pagination at the database level
+        document_ids = document_ids_query.offset((page - 1) * per_page).limit(per_page).all()
+        document_ids = [doc_id for (doc_id,) in document_ids]  # Extract IDs from result tuples
+        
+        # Now fetch only the necessary documents with all required relationships
+        if document_ids:
+            documents = Document.query.filter(
+                Document.id.in_(document_ids)
+            ).options(
+                # Eager loading of relationships
+                joinedload(Document.llm_analysis),
+                joinedload(Document.entity),
+                joinedload(Document.design_elements),
+                joinedload(Document.communication_focus),
+                joinedload(Document.extracted_text)
+            ).all()
+            
+            # Sort the results to match the order from the ID query
+            id_order_map = {id: index for index, id in enumerate(document_ids)}
+            documents.sort(key=lambda doc: id_order_map.get(doc.id, 0))
+        else:
+            documents = []
         
         # Create pagination object
         pagination = {
-            'page': paginated_result.page,
+            'page': page,
             'per_page': per_page,
-            'total': paginated_result.total,
-            'pages': paginated_result.pages,
-            'has_prev': paginated_result.has_prev,
-            'has_next': paginated_result.has_next,
-            'prev_page': paginated_result.prev_num if paginated_result.has_prev else None,
-            'next_page': paginated_result.next_num if paginated_result.has_next else None
+            'total': total_count,
+            'pages': (total_count + per_page - 1) // per_page,  # Ceiling division
+            'has_prev': page > 1,
+            'has_next': page < ((total_count + per_page - 1) // per_page),
+            'prev_page': page - 1 if page > 1 else None,
+            'next_page': page + 1 if page < ((total_count + per_page - 1) // per_page) else None
         }
         
         # Format results
@@ -335,66 +414,54 @@ def search_documents():
             except Exception as e:
                 current_app.logger.error(f"Preview generation failed for {doc.filename}: {str(e)}")
             
-            # Build formatted document
-            result = {
+            # Format document data
+            formatted_doc = {
                 'id': doc.id,
                 'filename': doc.filename,
                 'upload_date': doc.upload_date.strftime('%Y-%m-%d %H:%M:%S'),
-                'preview': preview,
                 'status': doc.status,
-                'summary': doc.llm_analysis.summary_description if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
+                'preview': preview,
+                'summary': doc.llm_analysis.summary_description if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
                 'keywords': [],
                 
                 # Add new fields from models
-                'document_type': doc.llm_analysis.campaign_type if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
-                'election_year': doc.llm_analysis.election_year if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
-                'document_tone': doc.llm_analysis.document_tone if (hasattr(doc, 'llm_analysis') and doc.llm_analysis) else '',
+                'document_type': doc.llm_analysis.campaign_type if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
+                'election_year': doc.llm_analysis.election_year if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
+                'document_tone': doc.llm_analysis.document_tone if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
                 
-                'client': doc.entity.client_name if (hasattr(doc, 'entity') and doc.entity) else '',
-                'opponent': doc.entity.opponent_name if (hasattr(doc, 'entity') and doc.entity) else '',
+                'client': doc.entity.client_name if hasattr(doc, 'entity') and doc.entity else '',
+                'opponent': doc.entity.opponent_name if hasattr(doc, 'entity') and doc.entity else '',
                 
-                'location': doc.design_elements.geographic_location if (hasattr(doc, 'design_elements') and doc.design_elements) else '',
-                'target_audience': doc.design_elements.target_audience if (hasattr(doc, 'design_elements') and doc.design_elements) else '',
+                'location': doc.design_elements.geographic_location if hasattr(doc, 'design_elements') and doc.design_elements else '',
+                'target_audience': doc.design_elements.target_audience if hasattr(doc, 'design_elements') and doc.design_elements else '',
                 
-                'primary_issue': doc.communication_focus.primary_issue if (hasattr(doc, 'communication_focus') and doc.communication_focus) else '',
+                'primary_issue': doc.communication_focus.primary_issue if hasattr(doc, 'communication_focus') and doc.communication_focus else '',
                 
-                'main_message': doc.extracted_text.main_message if (hasattr(doc, 'extracted_text') and doc.extracted_text) else '',
+                'main_message': doc.extracted_text.main_message if hasattr(doc, 'extracted_text') and doc.extracted_text else '',
                 
                 # Add hierarchical keywords for each document
                 'hierarchical_keywords': get_document_hierarchical_keywords(doc.id)
             }
             
-            # Add keywords
+            # Add keywords if they exist
             if hasattr(doc, 'llm_analysis') and doc.llm_analysis and hasattr(doc.llm_analysis, 'keywords'):
-                result['keywords'] = [
+                formatted_doc['keywords'] = [
                     {
                         'text': kw.keyword,
                         'category': kw.category
                     } for kw in doc.llm_analysis.keywords if hasattr(kw, 'keyword')
                 ]
             
-            results.append(result)
-        
-        # Generate taxonomy facets for sidebar
-        from app.models.keyword_models import KeywordTaxonomy
+            results.append(formatted_doc)
+            
+        # Generate taxonomy facets for filtering
         taxonomy_facets = generate_taxonomy_facets(primary_category, subcategory)
         
         # Record search time
         response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
         record_search_time(response_time)
         
-        # Return JSON for AJAX requests
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({
-                'results': results,
-                'pagination': pagination,
-                'response_time_ms': response_time,
-                'query': query,
-                'taxonomy_facets': taxonomy_facets,
-                'matching_terms': [term.to_dict() for term in taxonomy_terms] if taxonomy_terms else []
-            })
-        
-        # Gather filter options for search form
+        # Get filter options
         filter_options = {
             'document_types': db.session.query(LLMAnalysis.document_tone, func.count(LLMAnalysis.document_tone))
                 .group_by(LLMAnalysis.document_tone).all(),
@@ -404,6 +471,7 @@ def search_documents():
                 .group_by(DesignElement.geographic_location).all()
         }
         
+        # Return response
         return render_template(
             'pages/search.html', 
             documents=results, 
@@ -428,10 +496,17 @@ def search_documents():
         record_search_time(response_time)
         
         current_app.logger.error(f"Search error: {str(e)}", exc_info=True)
-        return render_template('pages/search.html', documents=[], query=query, error=str(e))
+        return render_template(
+            'pages/search.html', 
+            documents=[], 
+            query=query, 
+            error=str(e),
+            taxonomy_facets=taxonomy_facets  
+        )
 
 
 # Helper function to get hierarchical keywords for a document
+@cache.memoize(timeout=300)
 def get_document_hierarchical_keywords(document_id):
     """Get hierarchical keywords for a document"""
     try:
@@ -462,6 +537,7 @@ def get_document_hierarchical_keywords(document_id):
         return []
 
 # Generate taxonomy facets for sidebar
+@cache.memoize(timeout=300)
 def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None):
     """Generate taxonomy facets for sidebar filtering"""
     try:
@@ -513,8 +589,6 @@ def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None):
         return {'primary_categories': [], 'subcategories': []}
 
 
-
-        
 @main_routes.route('/api/reprocess-document/<int:document_id>', methods=['POST'])
 def reprocess_document(document_id):
     """API endpoint to reprocess a specific document by ID"""
@@ -535,9 +609,6 @@ def reprocess_document(document_id):
             'status': 'error',
             'message': str(e)
         }), 500
-
-
-
 
 
 @main_routes.route('/metrics-dashboard')
@@ -722,11 +793,6 @@ def get_search_response_time():
     return f"{round(avg_time, 2)} ms"
 
 
-
-#RECOVERY ROUTES
-
-
-
 @main_routes.route('/recovery-dashboard')
 def recovery_dashboard():
     """Display failed documents for recovery"""
@@ -898,4 +964,28 @@ def execute_sync():
             'message': str(e)
         }), 500
 
-
+@main_routes.route('/api/cache-stats')
+def cache_stats():
+    """Return basic cache statistics"""
+    stats = {
+        'cache_type': app.config['CACHE_TYPE'],
+        'default_timeout': app.config['CACHE_DEFAULT_TIMEOUT'],
+    }
+    
+    # Add Redis-specific stats if using Redis
+    if app.config['CACHE_TYPE'] == 'redis':
+        try:
+            import redis
+            redis_client = redis.from_url(app.config['CACHE_REDIS_URL'])
+            info = redis_client.info()
+            stats.update({
+                'connected_clients': info.get('connected_clients', 0),
+                'used_memory_human': info.get('used_memory_human', 'N/A'),
+                'hit_rate': info.get('keyspace_hits', 0) / 
+                           (info.get('keyspace_hits', 0) + info.get('keyspace_misses', 0) + 0.001),
+                'total_keys': sum(db.get('keys', 0) for db in info.get('keyspace', {}).values()),
+            })
+        except Exception as e:
+            stats['error'] = str(e)
+    
+    return jsonify(stats)

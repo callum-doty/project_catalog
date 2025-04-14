@@ -1,8 +1,9 @@
 # app/__init__.py
 from flask import Flask, session, request
 from flask_wtf.csrf import CSRFProtect
-from app.extensions import db, migrate
+from app.extensions import db, migrate, cache
 import os
+from flask_caching import Cache
 
 csrf = CSRFProtect()
 
@@ -18,6 +19,11 @@ def create_app():
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'generate_a_secure_random_key')
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+    app.config['CACHE_TYPE'] = 'redis'
+    app.config['CACHE_REDIS_URL'] = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
+    app.config['CACHE_DEFAULT_TIMEOUT'] = 300  # 5 minutes default timeout
+    cache.init_app(app)
     
     # CSRF Configuration
     app.config['WTF_CSRF_CHECK_DEFAULT'] = False  # Allow non-CSRF protected views by default
