@@ -22,38 +22,34 @@ class PreviewService:
     @cache.memoize(timeout=3600)
         
     def get_preview(self, filename):
-        """Generate preview for different file types"""
+        """Get preview for a file, first checking cache"""
         try:
-            self.logger.info(f"Generating preview for {filename}")
+            # Check cache first
+            cache_key = f"preview:{filename}"
+            cached_preview = cache.get(cache_key)
             
-            if not filename:
-                self.logger.warning("Empty filename provided")
-                return self._generate_placeholder_preview("No filename")
-                
-            file_ext = os.path.splitext(filename)[1].lower()
+            if cached_preview:
+                self.logger.info(f"Using cached preview for {filename}")
+                return cached_preview
             
-            # Get file data from MinIO
-            try:
-                file_data = self.storage.get_file(filename)
-                if not file_data or len(file_data) == 0:
-                    self.logger.error(f"No file data received for {filename}")
-                    return self._generate_placeholder_preview(f"Missing: {filename}")
-                self.logger.info(f"Retrieved file data for {filename}, size: {len(file_data)} bytes")
-            except Exception as e:
-                self.logger.error(f"Error retrieving file from storage: {str(e)}")
-                return self._generate_placeholder_preview(f"Error: {os.path.basename(filename)}")
-                
-            # Generate preview based on file type
-            if file_ext in self.supported_images:
-                return self._generate_image_preview(file_data, filename)
-            elif file_ext in self.supported_pdfs:
-                return self._generate_pdf_preview(file_data, filename)
-            else:
-                self.logger.warning(f"Unsupported file type: {file_ext}")
-                return self._generate_placeholder_preview(f"Unsupported: {file_ext}")
-                
+            # If not in cache, check if a preview generation is already in progress
+            in_progress_key = f"preview_in_progress:{filename}"
+            if cache.get(in_progress_key):
+                self.logger.info(f"Preview generation for {filename} already in progress, returning placeholder")
+                return self._generate_placeholder_preview("Preview being generated...")
+            
+            # Mark as in progress (1 minute timeout to prevent deadlocks)
+            cache.set(in_progress_key, True, timeout=60)
+            
+            # Queue background task for preview generation
+            from tasks.preview_tasks import generate_preview
+            generate_preview.delay(filename)
+            
+            # Generate preview synchronously for immediate display just this once
+            return self._generate_preview_internal(filename)
+            
         except Exception as e:
-            self.logger.error(f"Preview generation error for {filename}: {str(e)}", exc_info=True)
+            self.logger.error(f"Preview error for {filename}: {str(e)}", exc_info=True)
             return self._generate_placeholder_preview("Error generating preview")
 
     def _generate_image_preview(self, file_data, filename):

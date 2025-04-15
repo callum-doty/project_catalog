@@ -54,8 +54,8 @@ TASK_STATUSES = {
 # Configure task routing
 celery_app.conf.task_routes = {
     'tasks.process_document': {'queue': 'document_processing'},
-    'tasks.test_document_processing': {'queue': 'document_processing'},
     'tasks.analyze_document': {'queue': 'analysis'},
+    'tasks.generate_preview': {'queue': 'previews'},  
     'tasks.sync_dropbox': {'queue': 'document_processing'}, 
 }
 

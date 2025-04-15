@@ -61,7 +61,7 @@ services:
 
   celery-worker:
     build: .
-    command: celery -A tasks worker -Q document_processing,analysis,celery --loglevel=info
+    command: celery -A tasks worker -Q document_processing,analysis,previews,celery --loglevel=info
     volumes:
       - .:/app
     environment:

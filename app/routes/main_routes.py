@@ -3,6 +3,7 @@
 from flask import Blueprint, render_template, request, session, flash, redirect, url_for, jsonify, current_app
 from werkzeug.utils import secure_filename
 import os
+import app
 from sqlalchemy.orm import joinedload
 from datetime import datetime
 from app.services.storage_service import MinIOStorage
@@ -25,6 +26,8 @@ from functools import wraps
 from app.extensions import cache
 from app.services.document_service import get_document_count, get_document_counts_by_status
 from flask_caching import Cache
+from app.utils import search_with_timeout, document_has_column, monitor_query
+
 
 
 
@@ -122,6 +125,7 @@ def index():
     return redirect(url_for('main_routes.search_documents'))
 
 @main_routes.route('/dashboard')
+@monitor_query
 def dashboard():
     document_counts = get_document_counts_by_status()
     return render_template('dashboard.html', counts=document_counts)
@@ -199,15 +203,20 @@ def upload_file():
         minio_path = storage.upload_file(temp_path, filename)
         current_app.logger.info(f"Successfully uploaded {filename} to MinIO at {minio_path}")
 
-        # Use the full process_document task instead of test_document_processing
+        # Queue document processing
         try:
             current_app.logger.info(f"Queuing document {document.id} for processing")
+
             from tasks.document_tasks import process_document
             task = process_document.delay(filename, minio_path, document.id)
             current_app.logger.info(f"Task queued with ID: {task.id}")
+
+            from tasks.preview_tasks import generate_preview
+            preview_task = generate_preview.delay(filename, document.id)
+            current_app.logger.info(f"Preview task queued with ID: {preview_task.id}")
+
         except Exception as e:
-            current_app.logger.error(f"Failed to queue document for processing: {str(e)}")
-            # Even if processing queue fails, we'll still return success for file upload
+            current_app.logger.error(f"Failed to queue tasks for document: {str(e)}")
         
         os.remove(temp_path)
         flash('File uploaded successfully', 'success')
@@ -219,93 +228,68 @@ def upload_file():
         return redirect(url_for('main_routes.search_documents'))
 
 
-
-def cached_view(timeout=60, query_string=False):
-    def decorator(fn):
-        def wrapper(*args, **kwargs):
-            cache = current_app.extensions["cache"].get(Cache)
-            return cache.cached(timeout=timeout, query_string=query_string)(fn)(*args, **kwargs)
-        return wrapper
-    return decorator
-
-
 @main_routes.route('/search')
+@monitor_query
 @cache.cached(timeout=60, query_string=True)
 def search_documents():
     """Search implementation with full-text search capability"""
-    # Get search parameters from request
     query = request.args.get('q', '')
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 12, type=int)
     sort_by = request.args.get('sort_by', 'upload_date')
     sort_direction = request.args.get('sort_dir', 'desc')
-    
-    # Filter parameters
+
     filter_type = request.args.get('filter_type', '')
     filter_year = request.args.get('filter_year', '')
     filter_location = request.args.get('filter_location', '')
-    
-    # Taxonomy filter parameters
     primary_category = request.args.get('primary_category', '')
     subcategory = request.args.get('subcategory', '')
-    
-    start_time = time.time()  # Start timing
-    
-    # Initialize variables that might be used in the error handler
+
+    start_time = time.time()
     taxonomy_facets = {'primary_categories': [], 'subcategories': []}
     taxonomy_terms = []
-    
+
     try:
-        # Initialize base query
-        document_ids_query = db.session.query(Document.id)
-        
-        # Apply full-text search if query is provided
+        # Create a base query to find document IDs that match our criteria
+        base_query = db.session.query(Document.id)
+
+        # Apply text search if query is provided
         if query:
-            # Try to find matching taxonomy terms
-            taxonomy_terms = KeywordTaxonomy.query.filter(
-                KeywordTaxonomy.term.ilike(f'%{query}%')
-            ).limit(5).all()
-            
-            # Full-text search using search vectors if they exist
-            # Check if the search_vector column exists
-            has_search_vector = False
-            try:
-                Document.search_vector
-                has_search_vector = True
-            except AttributeError:
-                # Fallback to traditional search if search_vector doesn't exist
-                pass
-                
-            if has_search_vector:
-                # Convert search query to tsquery format
+            if hasattr(Document, 'search_vector') and document_has_column(Document, 'search_vector'):
+                # Full-text search approach
                 tsquery = func.plainto_tsquery('english', query)
                 
-                # Subquery for documents matching with full-text search
+                # Create separate subqueries for each table
                 doc_matches = db.session.query(Document.id).filter(
                     Document.search_vector.op('@@')(tsquery)
                 ).subquery()
                 
-                # Subquery for LLM Analysis matches
                 llm_matches = db.session.query(LLMAnalysis.document_id).filter(
                     LLMAnalysis.search_vector.op('@@')(tsquery)
                 ).subquery()
                 
-                # Subquery for Extracted Text matches
                 text_matches = db.session.query(ExtractedText.document_id).filter(
                     ExtractedText.search_vector.op('@@')(tsquery)
                 ).subquery()
                 
-                # Combine all matches
-                document_ids_query = document_ids_query.filter(
-                    or_(
-                        Document.id.in_(doc_matches),
-                        Document.id.in_(llm_matches),
-                        Document.id.in_(text_matches)
+                # Union all the matches
+                combined_matches = base_query.join(
+                    doc_matches, Document.id == doc_matches.c.id, isouter=True
+                ).union(
+                    db.session.query(Document.id).join(
+                        llm_matches, Document.id == llm_matches.c.document_id, isouter=True
+                    ),
+                    db.session.query(Document.id).join(
+                        text_matches, Document.id == text_matches.c.document_id, isouter=True
                     )
+                ).subquery()
+                
+                base_query = db.session.query(Document.id).join(
+                    combined_matches, Document.id == combined_matches.c.id
                 )
             else:
-                # Fallback to traditional search with ILIKE
-                document_ids_query = document_ids_query.outerjoin(
+                # Traditional search with ILIKE
+                base_query = base_query.outerjoin(
                     LLMAnalysis, Document.id == LLMAnalysis.document_id
                 ).outerjoin(
                     LLMKeyword, LLMAnalysis.id == LLMKeyword.llm_analysis_id
@@ -316,82 +300,134 @@ def search_documents():
                         Document.filename.ilike(f'%{query}%'),
                         LLMAnalysis.summary_description.ilike(f'%{query}%'),
                         LLMKeyword.keyword.ilike(f'%{query}%'),
-                        ExtractedText.main_message.ilike(f'%{query}%')
+                        ExtractedText.main_message.ilike(f'%{query}%'),
+                        ExtractedText.supporting_text.ilike(f'%{query}%')
                     )
                 )
-        
-        # Apply other filters
+
+        # Apply filter_type filter
         if filter_type:
-            type_matches = db.session.query(LLMAnalysis.document_id).filter(
-                LLMAnalysis.document_tone == filter_type
-            ).subquery()
-            document_ids_query = document_ids_query.filter(Document.id.in_(type_matches))
-                
+            base_query = base_query.join(
+                LLMAnalysis, Document.id == LLMAnalysis.document_id, isouter=True
+            )
+            
+            if ',' in filter_type:
+                # Multiple types (comma separated)
+                doc_type_list = filter_type.split(',')
+                base_query = base_query.filter(LLMAnalysis.document_tone.in_(doc_type_list))
+            else:
+                # Single type
+                base_query = base_query.filter(LLMAnalysis.document_tone == filter_type)
+
+        # Apply filter_year filter
         if filter_year:
-            year_matches = db.session.query(LLMAnalysis.document_id).filter(
-                LLMAnalysis.election_year == filter_year
-            ).subquery()
-            document_ids_query = document_ids_query.filter(Document.id.in_(year_matches))
-                
+            if not filter_type:  # Only join LLMAnalysis if not already joined
+                base_query = base_query.join(
+                    LLMAnalysis, Document.id == LLMAnalysis.document_id, isouter=True
+                )
+            base_query = base_query.filter(LLMAnalysis.election_year == filter_year)
+
+        # Apply filter_location filter
         if filter_location:
-            loc_matches = db.session.query(DesignElement.document_id).filter(
+            base_query = base_query.join(
+                DesignElement, Document.id == DesignElement.document_id, isouter=True
+            ).filter(
                 func.lower(DesignElement.geographic_location).like(f"%{filter_location.lower()}%")
-            ).subquery()
-            document_ids_query = document_ids_query.filter(Document.id.in_(loc_matches))
-        
+            )
+
         # Apply taxonomy filters
         if primary_category:
-            taxonomy_matches = db.session.query(DocumentKeyword.document_id).join(
+            taxonomy_query = db.session.query(DocumentKeyword.document_id).join(
                 KeywordTaxonomy, DocumentKeyword.taxonomy_id == KeywordTaxonomy.id
             ).filter(
                 KeywordTaxonomy.primary_category == primary_category
             )
             
             if subcategory:
-                taxonomy_matches = taxonomy_matches.filter(
+                taxonomy_query = taxonomy_query.filter(
                     KeywordTaxonomy.subcategory == subcategory
                 )
                 
-            taxonomy_matches = taxonomy_matches.subquery()
-            document_ids_query = document_ids_query.filter(Document.id.in_(taxonomy_matches))
+            taxonomy_ids = taxonomy_query.subquery()
+            base_query = base_query.join(
+                taxonomy_ids, Document.id == taxonomy_ids.c.document_id
+            )
+
+        # Add distinct to ensure no duplicates
+        base_query = base_query.distinct()
         
+        # Count total results before applying pagination
+        total_count = base_query.count()
+        
+        # Apply sorting
         if sort_by == 'filename':
+            # To sort by filename, we need to join with Document
+            document_query = db.session.query(Document).filter(
+                Document.id.in_(base_query)
+            )
+            
             if sort_direction == 'desc':
-                document_ids_query = document_ids_query.order_by(Document.filename.desc())
+                document_query = document_query.order_by(Document.filename.desc())
             else:
-                document_ids_query = document_ids_query.order_by(Document.filename)
-        else:  # Default to sort by upload date
+                document_query = document_query.order_by(Document.filename.asc())
+                
+            # Apply pagination
+            documents = document_query.offset((page - 1) * per_page).limit(per_page).all()
+            document_ids = [doc.id for doc in documents]
+        else:
+            # Default sort by upload_date
+            document_query = db.session.query(Document).filter(
+                Document.id.in_(base_query)
+            )
+            
             if sort_direction == 'desc':
-                document_ids_query = document_ids_query.order_by(Document.upload_date.desc())
+                document_query = document_query.order_by(Document.upload_date.desc())
             else:
-                document_ids_query = document_ids_query.order_by(Document.upload_date)
-        
-        # Get total count for pagination before applying limit/offset
-        total_count = document_ids_query.count()
-        
-        # Apply pagination at the database level
-        document_ids = document_ids_query.offset((page - 1) * per_page).limit(per_page).all()
-        document_ids = [doc_id for (doc_id,) in document_ids]  # Extract IDs from result tuples
-        
-        # Now fetch only the necessary documents with all required relationships
+                document_query = document_query.order_by(Document.upload_date.asc())
+                
+            # Apply pagination
+            documents = document_query.offset((page - 1) * per_page).limit(per_page).all()
+            document_ids = [doc.id for doc in documents]
+
+        # Fetch the full documents with eager loading of relationships
         if document_ids:
+            # Get complete documents with all relationships loaded
             documents = Document.query.filter(
                 Document.id.in_(document_ids)
             ).options(
-                # Eager loading of relationships
-                joinedload(Document.llm_analysis),
+                joinedload(Document.llm_analysis).joinedload(LLMAnalysis.keywords),
                 joinedload(Document.entity),
                 joinedload(Document.design_elements),
                 joinedload(Document.communication_focus),
                 joinedload(Document.extracted_text)
             ).all()
             
-            # Sort the results to match the order from the ID query
-            id_order_map = {id: index for index, id in enumerate(document_ids)}
-            documents.sort(key=lambda doc: id_order_map.get(doc.id, 0))
+            # Keep the documents in the same order as document_ids
+            id_to_doc = {doc.id: doc for doc in documents}
+            documents = [id_to_doc[doc_id] for doc_id in document_ids if doc_id in id_to_doc]
         else:
             documents = []
-        
+
+        # Bulk load hierarchical keywords for all documents
+        all_keywords = get_document_hierarchical_keywords_bulk(document_ids) if document_ids else {}
+
+        # Check for missing previews and queue generation
+        if documents:
+            filenames_to_check = [doc.filename for doc in documents]
+            missing_previews = []
+            for filename in filenames_to_check:
+                cache_key = f"preview:{filename}"
+                if not cache.get(cache_key):
+                    missing_previews.append(filename)
+            
+            if missing_previews:
+                try:
+                    from tasks.preview_tasks import generate_preview
+                    for filename in missing_previews:
+                        generate_preview.delay(filename)
+                except Exception as e:
+                    current_app.logger.error(f"Error queueing preview generation: {str(e)}")
+
         # Create pagination object
         pagination = {
             'page': page,
@@ -403,18 +439,16 @@ def search_documents():
             'prev_page': page - 1 if page > 1 else None,
             'next_page': page + 1 if page < ((total_count + per_page - 1) // per_page) else None
         }
-        
+
         # Format results
         results = []
         for doc in documents:
-            # Get preview if possible
-            preview = None
             try:
                 preview = preview_service.get_preview(doc.filename)
             except Exception as e:
                 current_app.logger.error(f"Preview generation failed for {doc.filename}: {str(e)}")
-            
-            # Format document data
+                preview = None
+
             formatted_doc = {
                 'id': doc.id,
                 'filename': doc.filename,
@@ -422,46 +456,33 @@ def search_documents():
                 'status': doc.status,
                 'preview': preview,
                 'summary': doc.llm_analysis.summary_description if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
-                'keywords': [],
-                
-                # Add new fields from models
-                'document_type': doc.llm_analysis.campaign_type if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
-                'election_year': doc.llm_analysis.election_year if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
-                'document_tone': doc.llm_analysis.document_tone if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
-                
-                'client': doc.entity.client_name if hasattr(doc, 'entity') and doc.entity else '',
-                'opponent': doc.entity.opponent_name if hasattr(doc, 'entity') and doc.entity else '',
-                
-                'location': doc.design_elements.geographic_location if hasattr(doc, 'design_elements') and doc.design_elements else '',
-                'target_audience': doc.design_elements.target_audience if hasattr(doc, 'design_elements') and doc.design_elements else '',
-                
-                'primary_issue': doc.communication_focus.primary_issue if hasattr(doc, 'communication_focus') and doc.communication_focus else '',
-                
-                'main_message': doc.extracted_text.main_message if hasattr(doc, 'extracted_text') and doc.extracted_text else '',
-                
-                # Add hierarchical keywords for each document
-                'hierarchical_keywords': get_document_hierarchical_keywords(doc.id)
-            }
-            
-            # Add keywords if they exist
-            if hasattr(doc, 'llm_analysis') and doc.llm_analysis and hasattr(doc.llm_analysis, 'keywords'):
-                formatted_doc['keywords'] = [
+                'keywords': [
                     {
                         'text': kw.keyword,
                         'category': kw.category
-                    } for kw in doc.llm_analysis.keywords if hasattr(kw, 'keyword')
-                ]
-            
+                    } for kw in (doc.llm_analysis.keywords if hasattr(doc, 'llm_analysis') and doc.llm_analysis else [])
+                    if hasattr(kw, 'keyword')
+                ],
+                'document_type': doc.llm_analysis.campaign_type if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
+                'election_year': doc.llm_analysis.election_year if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
+                'document_tone': doc.llm_analysis.document_tone if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
+                'client': doc.entity.client_name if hasattr(doc, 'entity') and doc.entity else '',
+                'opponent': doc.entity.opponent_name if hasattr(doc, 'entity') and doc.entity else '',
+                'location': doc.design_elements.geographic_location if hasattr(doc, 'design_elements') and doc.design_elements else '',
+                'target_audience': doc.design_elements.target_audience if hasattr(doc, 'design_elements') and doc.design_elements else '',
+                'primary_issue': doc.communication_focus.primary_issue if hasattr(doc, 'communication_focus') and doc.communication_focus else '',
+                'main_message': doc.extracted_text.main_message if hasattr(doc, 'extracted_text') and doc.extracted_text else '',
+                'hierarchical_keywords': all_keywords.get(doc.id, [])
+            }
+
             results.append(formatted_doc)
-            
-        # Generate taxonomy facets for filtering
+
+        # Generate taxonomy facets and record response time
         taxonomy_facets = generate_taxonomy_facets(primary_category, subcategory)
-        
-        # Record search time
-        response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+        response_time = (time.time() - start_time) * 1000
         record_search_time(response_time)
-        
-        # Get filter options
+
+        # Get filter options for the form
         filter_options = {
             'document_types': db.session.query(LLMAnalysis.document_tone, func.count(LLMAnalysis.document_tone))
                 .group_by(LLMAnalysis.document_tone).all(),
@@ -470,11 +491,10 @@ def search_documents():
             'locations': db.session.query(DesignElement.geographic_location, func.count(DesignElement.geographic_location))
                 .group_by(DesignElement.geographic_location).all()
         }
-        
-        # Return response
+
         return render_template(
-            'pages/search.html', 
-            documents=results, 
+            'pages/search.html',
+            documents=results,
             query=query,
             pagination=pagination,
             sort_by=sort_by,
@@ -489,20 +509,19 @@ def search_documents():
             taxonomy_facets=taxonomy_facets,
             matching_terms=taxonomy_terms
         )
-        
+
     except Exception as e:
-        # Error handling
         response_time = (time.time() - start_time) * 1000
         record_search_time(response_time)
-        
         current_app.logger.error(f"Search error: {str(e)}", exc_info=True)
         return render_template(
-            'pages/search.html', 
-            documents=[], 
-            query=query, 
+            'pages/search.html',
+            documents=[],
+            query=query,
             error=str(e),
-            taxonomy_facets=taxonomy_facets  
+            taxonomy_facets=taxonomy_facets
         )
+
 
 
 # Helper function to get hierarchical keywords for a document
@@ -541,14 +560,20 @@ def get_document_hierarchical_keywords(document_id):
 def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None):
     """Generate taxonomy facets for sidebar filtering"""
     try:
-        from app.models.keyword_models import KeywordTaxonomy, DocumentKeyword
+        # Create a CTE for documents that have keywords
+        docs_with_keywords = db.session.query(
+            DocumentKeyword.taxonomy_id, 
+            func.count(DocumentKeyword.document_id.distinct()).label('doc_count')
+        ).group_by(
+            DocumentKeyword.taxonomy_id
+        ).cte('docs_with_keywords')
         
         # Get primary categories with counts
         primary_categories = db.session.query(
             KeywordTaxonomy.primary_category,
-            func.count(KeywordTaxonomy.id.distinct()).label('count')
+            func.sum(docs_with_keywords.c.doc_count).label('count')
         ).join(
-            DocumentKeyword, KeywordTaxonomy.id == DocumentKeyword.taxonomy_id
+            docs_with_keywords, KeywordTaxonomy.id == docs_with_keywords.c.taxonomy_id
         ).group_by(
             KeywordTaxonomy.primary_category
         ).order_by(
@@ -989,3 +1014,94 @@ def cache_stats():
             stats['error'] = str(e)
     
     return jsonify(stats)
+
+
+@main_routes.route('/api/preview-status/<path:filename>')
+def preview_status(filename):
+    """Check if a preview is available in cache"""
+    cache_key = f"preview:{filename}"
+    preview_data = cache.get(cache_key)
+    
+    if preview_data:
+        return jsonify({
+            'status': 'available',
+            'preview_url': preview_data
+        })
+    else:
+        # Check if still in progress
+        in_progress = cache.get(f"preview_in_progress:{filename}")
+        return jsonify({
+            'status': 'pending' if in_progress else 'not_found'
+        })
+
+def get_document_hierarchical_keywords_bulk(document_ids):
+    """Efficiently get hierarchical keywords for multiple documents at once"""
+    try:
+        keywords_data = db.session.query(
+            DocumentKeyword.document_id, 
+            KeywordTaxonomy.id,
+            KeywordTaxonomy.term,
+            KeywordTaxonomy.primary_category,
+            KeywordTaxonomy.subcategory,
+            DocumentKeyword.relevance_score
+        ).join(
+            KeywordTaxonomy, DocumentKeyword.taxonomy_id == KeywordTaxonomy.id
+        ).filter(
+            DocumentKeyword.document_id.in_(document_ids)
+        ).all()
+        
+        results = {doc_id: [] for doc_id in document_ids}
+        
+        for doc_id, tax_id, term, primary_cat, subcat, score in keywords_data:
+            results[doc_id].append({
+                'id': tax_id,
+                'term': term,
+                'primary_category': primary_cat,
+                'subcategory': subcat,
+                'relevance_score': score
+            })
+        
+        return results
+    except Exception as e:
+        current_app.logger.error(f"Error getting hierarchical keywords: {str(e)}")
+        return {doc_id: [] for doc_id in document_ids}
+
+
+
+@main_routes.route('/api/documents')
+def api_documents():
+    last_id = request.args.get('last_id', type=int)
+    limit = request.args.get('limit', 20, type=int)
+    
+    query = Document.query.order_by(Document.id)
+    
+    if last_id:
+        # Keyset pagination - much more efficient for large tables
+        query = query.filter(Document.id > last_id)
+    
+    documents = query.limit(limit).all()
+    
+    return jsonify({
+        'documents': [doc.to_dict() for doc in documents],
+        'has_more': len(documents) == limit,
+        'last_id': documents[-1].id if documents else None
+    })
+
+
+# Add to app/routes/main_routes.py
+
+@main_routes.route('/api/preview/<path:filename>')
+def get_document_preview(filename):
+    """API endpoint for fetching document previews"""
+    try:
+        preview = preview_service.get_preview(filename)
+        return jsonify({
+            'status': 'success',
+            'preview': preview
+        })
+    except Exception as e:
+        current_app.logger.error(f"Preview API error for {filename}: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 404

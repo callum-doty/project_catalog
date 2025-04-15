@@ -50,31 +50,18 @@
   {% endif %}
 
   <!-- Preview Section -->
-  <div class="w-full h-48 bg-gray-100 flex items-center justify-center">
-    {% if doc.preview %}
-    <img
-      src="{{ doc.preview }}"
-      alt="Preview of {{ doc.filename }}"
-      class="w-full h-full object-contain"
-    />
-    {% else %}
-    <div class="flex flex-col items-center text-gray-400">
-      <svg
-        class="w-12 h-12 mb-2"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-        />
-      </svg>
-      <span>No preview available</span>
+
+  <div
+    class="preview-container"
+    data-filename="{{ doc.filename }}"
+    data-loaded="false"
+  >
+    <div class="placeholder-preview flex items-center justify-center h-full">
+      <div class="animate-pulse flex flex-col items-center">
+        <div class="rounded-lg bg-gray-200 h-32 w-48"></div>
+        <div class="text-gray-400 mt-2">Loading preview...</div>
+      </div>
     </div>
-    {% endif %}
   </div>
 
   <div class="p-6">

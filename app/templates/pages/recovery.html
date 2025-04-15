@@ -28,7 +28,10 @@
         <img
           src="{{ doc.preview }}"
           alt="Preview of {{ doc.filename }}"
-          class="w-full h-full object-contain"
+          class="preview-image"
+          loading="lazy"
+          decoding="async"
+          onerror="this.onerror=null; this.src='/static/img/placeholder.png';"
         />
         {% else %}
         <div class="flex flex-col items-center text-gray-400">

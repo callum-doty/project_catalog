@@ -29,6 +29,28 @@
 </style>
 {% endblock %}
 
+<!-- Add to search form -->
+<button type="submit" class="search-button px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center">
+  <span class="search-button-text">Search</span>
+  <svg class="search-spinner ml-2 animate-spin h-4 w-4 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+  </svg>
+</button>
+
+<script>
+  // Show loading state on form submit
+  document.getElementById('searchForm').addEventListener('submit', function() {
+    const button = this.querySelector('.search-button');
+    const buttonText = button.querySelector('.search-button-text');
+    const spinner = button.querySelector('.search-spinner');
+    
+    buttonText.textContent = 'Searching...';
+    spinner.classList.remove('hidden');
+  });
+</script>
+
+
 {% block content %}
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
   <!-- Search Form -->
@@ -131,12 +153,12 @@
             <!-- Preview Section -->
             <div class="w-full h-48 bg-gray-100 flex items-center justify-center">
               {% if doc.preview %}
-              <img
-                src="{{ doc.preview }}"
-                alt="Preview of {{ doc.filename }}"
-                class="w-full h-full object-contain preview-image"
-                onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzY2NiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik0xNCAySDZhMiAyIDAgMCAwLTIgMnYxNmEyIDIgMCAwIDAgMiAyaDEyYTIgMiAwIDAgMCAyLTJWOHoiPjwvcGF0aD48cG9seWxpbmUgcG9pbnRzPSIxNCAyIDE0IDggMjAgOCI+PC9wb2x5bGluZT48L3N2Zz4='; this.classList.add('fallback-icon');"
-              />
+              <img src="{{ doc.preview }}" 
+                alt="Preview of {{ doc.filename }}" 
+                class="preview-image" 
+                loading="lazy" 
+                decoding="async"
+                onerror="this.onerror=null; this.src='/static/img/placeholder.png';">
               {% else %}
               <div class="flex flex-col items-center text-gray-400">
                 <svg class="w-12 h-12 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -264,6 +286,49 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/search.js') }}"></script>
 <script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Track when search results are in viewport
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      // When a result card enters viewport, load its preview if not already loaded
+      if (entry.isIntersecting) {
+        const card = entry.target;
+        const previewContainer = card.querySelector('.preview-container');
+        if (previewContainer && previewContainer.dataset.loaded === 'false') {
+          loadPreview(previewContainer, previewContainer.dataset.filename);
+          previewContainer.dataset.loaded = 'true';
+        }
+        // Unobserve after loading
+        observer.unobserve(card);
+      }
+    });
+  }, {
+    rootMargin: '100px' // Load when within 100px of viewport
+  });
+  
+  // Observe all document cards
+  document.querySelectorAll('.document-card').forEach(card => {
+    observer.observe(card);
+  });
+  
+  // Function to load preview asynchronously
+  function loadPreview(container, filename) {
+    const placeholderHtml = container.innerHTML; // Save placeholder
+    
+    fetch(`/api/preview/${encodeURIComponent(filename)}`)
+      .then(response => response.json())
+      .then(data => {
+        if (data.preview) {
+          container.innerHTML = `<img src="${data.preview}" alt="Preview of ${filename}" class="preview-image fade-in">`;
+        }
+      })
+      .catch(error => {
+        console.error('Error loading preview:', error);
+        container.innerHTML = placeholderHtml; // Restore placeholder on error
+      });
+  }
+});
+
   // Taxonomy Filter Functions
   function updateTaxonomyFilter(type, value) {
     const urlParams = new URLSearchParams(window.location.search);
