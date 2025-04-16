@@ -226,302 +226,12 @@ def upload_file():
         current_app.logger.error(f"Upload error: {str(e)}")
         flash(f'Error uploading file: {str(e)}', 'error')
         return redirect(url_for('main_routes.search_documents'))
-
-
+    
+    
 @main_routes.route('/search')
-@monitor_query
-@cache.cached(timeout=60, query_string=True)
 def search_documents():
-    """Search implementation with full-text search capability"""
-    query = request.args.get('q', '')
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 12, type=int)
-    sort_by = request.args.get('sort_by', 'upload_date')
-    sort_direction = request.args.get('sort_dir', 'desc')
-
-    filter_type = request.args.get('filter_type', '')
-    filter_year = request.args.get('filter_year', '')
-    filter_location = request.args.get('filter_location', '')
-    primary_category = request.args.get('primary_category', '')
-    subcategory = request.args.get('subcategory', '')
-
-    start_time = time.time()
-    taxonomy_facets = {'primary_categories': [], 'subcategories': []}
-    taxonomy_terms = []
-
-    try:
-        # Create a base query to find document IDs that match our criteria
-        base_query = db.session.query(Document.id)
-
-        # Apply text search if query is provided
-        if query:
-            if hasattr(Document, 'search_vector') and document_has_column(Document, 'search_vector'):
-                # Full-text search approach
-                tsquery = func.plainto_tsquery('english', query)
-                
-                # Create separate subqueries for each table
-                doc_matches = db.session.query(Document.id).filter(
-                    Document.search_vector.op('@@')(tsquery)
-                ).subquery()
-                
-                llm_matches = db.session.query(LLMAnalysis.document_id).filter(
-                    LLMAnalysis.search_vector.op('@@')(tsquery)
-                ).subquery()
-                
-                text_matches = db.session.query(ExtractedText.document_id).filter(
-                    ExtractedText.search_vector.op('@@')(tsquery)
-                ).subquery()
-                
-                # Union all the matches
-                combined_matches = base_query.join(
-                    doc_matches, Document.id == doc_matches.c.id, isouter=True
-                ).union(
-                    db.session.query(Document.id).join(
-                        llm_matches, Document.id == llm_matches.c.document_id, isouter=True
-                    ),
-                    db.session.query(Document.id).join(
-                        text_matches, Document.id == text_matches.c.document_id, isouter=True
-                    )
-                ).subquery()
-                
-                base_query = db.session.query(Document.id).join(
-                    combined_matches, Document.id == combined_matches.c.id
-                )
-            else:
-                # Traditional search with ILIKE
-                base_query = base_query.outerjoin(
-                    LLMAnalysis, Document.id == LLMAnalysis.document_id
-                ).outerjoin(
-                    LLMKeyword, LLMAnalysis.id == LLMKeyword.llm_analysis_id
-                ).outerjoin(
-                    ExtractedText, Document.id == ExtractedText.document_id
-                ).filter(
-                    or_(
-                        Document.filename.ilike(f'%{query}%'),
-                        LLMAnalysis.summary_description.ilike(f'%{query}%'),
-                        LLMKeyword.keyword.ilike(f'%{query}%'),
-                        ExtractedText.main_message.ilike(f'%{query}%'),
-                        ExtractedText.supporting_text.ilike(f'%{query}%')
-                    )
-                )
-
-        # Apply filter_type filter
-        if filter_type:
-            base_query = base_query.join(
-                LLMAnalysis, Document.id == LLMAnalysis.document_id, isouter=True
-            )
-            
-            if ',' in filter_type:
-                # Multiple types (comma separated)
-                doc_type_list = filter_type.split(',')
-                base_query = base_query.filter(LLMAnalysis.document_tone.in_(doc_type_list))
-            else:
-                # Single type
-                base_query = base_query.filter(LLMAnalysis.document_tone == filter_type)
-
-        # Apply filter_year filter
-        if filter_year:
-            if not filter_type:  # Only join LLMAnalysis if not already joined
-                base_query = base_query.join(
-                    LLMAnalysis, Document.id == LLMAnalysis.document_id, isouter=True
-                )
-            base_query = base_query.filter(LLMAnalysis.election_year == filter_year)
-
-        # Apply filter_location filter
-        if filter_location:
-            base_query = base_query.join(
-                DesignElement, Document.id == DesignElement.document_id, isouter=True
-            ).filter(
-                func.lower(DesignElement.geographic_location).like(f"%{filter_location.lower()}%")
-            )
-
-        # Apply taxonomy filters
-        if primary_category:
-            taxonomy_query = db.session.query(DocumentKeyword.document_id).join(
-                KeywordTaxonomy, DocumentKeyword.taxonomy_id == KeywordTaxonomy.id
-            ).filter(
-                KeywordTaxonomy.primary_category == primary_category
-            )
-            
-            if subcategory:
-                taxonomy_query = taxonomy_query.filter(
-                    KeywordTaxonomy.subcategory == subcategory
-                )
-                
-            taxonomy_ids = taxonomy_query.subquery()
-            base_query = base_query.join(
-                taxonomy_ids, Document.id == taxonomy_ids.c.document_id
-            )
-
-        # Add distinct to ensure no duplicates
-        base_query = base_query.distinct()
-        
-        # Count total results before applying pagination
-        total_count = base_query.count()
-        
-        # Apply sorting
-        if sort_by == 'filename':
-            # To sort by filename, we need to join with Document
-            document_query = db.session.query(Document).filter(
-                Document.id.in_(base_query)
-            )
-            
-            if sort_direction == 'desc':
-                document_query = document_query.order_by(Document.filename.desc())
-            else:
-                document_query = document_query.order_by(Document.filename.asc())
-                
-            # Apply pagination
-            documents = document_query.offset((page - 1) * per_page).limit(per_page).all()
-            document_ids = [doc.id for doc in documents]
-        else:
-            # Default sort by upload_date
-            document_query = db.session.query(Document).filter(
-                Document.id.in_(base_query)
-            )
-            
-            if sort_direction == 'desc':
-                document_query = document_query.order_by(Document.upload_date.desc())
-            else:
-                document_query = document_query.order_by(Document.upload_date.asc())
-                
-            # Apply pagination
-            documents = document_query.offset((page - 1) * per_page).limit(per_page).all()
-            document_ids = [doc.id for doc in documents]
-
-        # Fetch the full documents with eager loading of relationships
-        if document_ids:
-            # Get complete documents with all relationships loaded
-            documents = Document.query.filter(
-                Document.id.in_(document_ids)
-            ).options(
-                joinedload(Document.llm_analysis).joinedload(LLMAnalysis.keywords),
-                joinedload(Document.entity),
-                joinedload(Document.design_elements),
-                joinedload(Document.communication_focus),
-                joinedload(Document.extracted_text)
-            ).all()
-            
-            # Keep the documents in the same order as document_ids
-            id_to_doc = {doc.id: doc for doc in documents}
-            documents = [id_to_doc[doc_id] for doc_id in document_ids if doc_id in id_to_doc]
-        else:
-            documents = []
-
-        # Bulk load hierarchical keywords for all documents
-        all_keywords = get_document_hierarchical_keywords_bulk(document_ids) if document_ids else {}
-
-        # Check for missing previews and queue generation
-        if documents:
-            filenames_to_check = [doc.filename for doc in documents]
-            missing_previews = []
-            for filename in filenames_to_check:
-                cache_key = f"preview:{filename}"
-                if not cache.get(cache_key):
-                    missing_previews.append(filename)
-            
-            if missing_previews:
-                try:
-                    from tasks.preview_tasks import generate_preview
-                    for filename in missing_previews:
-                        generate_preview.delay(filename)
-                except Exception as e:
-                    current_app.logger.error(f"Error queueing preview generation: {str(e)}")
-
-        # Create pagination object
-        pagination = {
-            'page': page,
-            'per_page': per_page,
-            'total': total_count,
-            'pages': (total_count + per_page - 1) // per_page,  # Ceiling division
-            'has_prev': page > 1,
-            'has_next': page < ((total_count + per_page - 1) // per_page),
-            'prev_page': page - 1 if page > 1 else None,
-            'next_page': page + 1 if page < ((total_count + per_page - 1) // per_page) else None
-        }
-
-        # Format results
-        results = []
-        for doc in documents:
-            try:
-                preview = preview_service.get_preview(doc.filename)
-            except Exception as e:
-                current_app.logger.error(f"Preview generation failed for {doc.filename}: {str(e)}")
-                preview = None
-
-            formatted_doc = {
-                'id': doc.id,
-                'filename': doc.filename,
-                'upload_date': doc.upload_date.strftime('%Y-%m-%d %H:%M:%S'),
-                'status': doc.status,
-                'preview': preview,
-                'summary': doc.llm_analysis.summary_description if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
-                'keywords': [
-                    {
-                        'text': kw.keyword,
-                        'category': kw.category
-                    } for kw in (doc.llm_analysis.keywords if hasattr(doc, 'llm_analysis') and doc.llm_analysis else [])
-                    if hasattr(kw, 'keyword')
-                ],
-                'document_type': doc.llm_analysis.campaign_type if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
-                'election_year': doc.llm_analysis.election_year if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
-                'document_tone': doc.llm_analysis.document_tone if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
-                'client': doc.entity.client_name if hasattr(doc, 'entity') and doc.entity else '',
-                'opponent': doc.entity.opponent_name if hasattr(doc, 'entity') and doc.entity else '',
-                'location': doc.design_elements.geographic_location if hasattr(doc, 'design_elements') and doc.design_elements else '',
-                'target_audience': doc.design_elements.target_audience if hasattr(doc, 'design_elements') and doc.design_elements else '',
-                'primary_issue': doc.communication_focus.primary_issue if hasattr(doc, 'communication_focus') and doc.communication_focus else '',
-                'main_message': doc.extracted_text.main_message if hasattr(doc, 'extracted_text') and doc.extracted_text else '',
-                'hierarchical_keywords': all_keywords.get(doc.id, [])
-            }
-
-            results.append(formatted_doc)
-
-        # Generate taxonomy facets and record response time
-        taxonomy_facets = generate_taxonomy_facets(primary_category, subcategory)
-        response_time = (time.time() - start_time) * 1000
-        record_search_time(response_time)
-
-        # Get filter options for the form
-        filter_options = {
-            'document_types': db.session.query(LLMAnalysis.document_tone, func.count(LLMAnalysis.document_tone))
-                .group_by(LLMAnalysis.document_tone).all(),
-            'years': db.session.query(LLMAnalysis.election_year, func.count(LLMAnalysis.election_year))
-                .group_by(LLMAnalysis.election_year).all(),
-            'locations': db.session.query(DesignElement.geographic_location, func.count(DesignElement.geographic_location))
-                .group_by(DesignElement.geographic_location).all()
-        }
-
-        return render_template(
-            'pages/search.html',
-            documents=results,
-            query=query,
-            pagination=pagination,
-            sort_by=sort_by,
-            sort_dir=sort_direction,
-            filter_options=filter_options,
-            filter_type=filter_type,
-            filter_year=filter_year,
-            filter_location=filter_location,
-            primary_category=primary_category,
-            subcategory=subcategory,
-            response_time_ms=round(response_time, 2),
-            taxonomy_facets=taxonomy_facets,
-            matching_terms=taxonomy_terms
-        )
-
-    except Exception as e:
-        response_time = (time.time() - start_time) * 1000
-        record_search_time(response_time)
-        current_app.logger.error(f"Search error: {str(e)}", exc_info=True)
-        return render_template(
-            'pages/search.html',
-            documents=[],
-            query=query,
-            error=str(e),
-            taxonomy_facets=taxonomy_facets
-        )
-
+    """Redirect to the search route"""
+    return redirect(url_for('search_routes.search_documents', **request.args))
 
 
 # Helper function to get hierarchical keywords for a document
@@ -1105,3 +815,30 @@ def get_document_preview(filename):
             'status': 'error',
             'message': str(e)
         }), 404
+
+
+@main_routes.route('/api/sync-status')
+def sync_status():
+    """API endpoint to check sync status"""
+    try:
+        # Check if DropboxService is available
+        try:
+            from app.services.dropbox_service import DropboxService
+            dropbox_service = DropboxService()
+            status = dropbox_service.get_sync_status()
+        except ImportError:
+            # If Dropbox service not available, return dummy data
+            status = {
+                'dropbox_connected': False,
+                'last_sync_time': None,
+                'last_status': 'NOT_CONFIGURED',
+                'message': 'Dropbox integration not configured'
+            }
+            
+        return jsonify(status)
+    except Exception as e:
+        current_app.logger.error(f"Error checking sync status: {str(e)}")
+        return jsonify({
+            'error': str(e),
+            'dropbox_connected': False
+        }), 500

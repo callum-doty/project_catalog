@@ -53,6 +53,10 @@ def create_app():
         from app.routes.main_routes import main_routes
         app.register_blueprint(main_routes)
         
+        # Register search routes with a prefix
+        from app.routes.search_routes import search_routes
+        app.register_blueprint(search_routes, url_prefix='/search')
+        
         # Add security headers middleware
         @app.after_request
         def add_security_headers(response):

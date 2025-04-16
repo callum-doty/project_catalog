@@ -17,9 +17,19 @@ except ImportError as e:
     print(f"Warning: Failed to import recovery_tasks: {str(e)}")
     reprocess_document = None
 
+# Import preview tasks
+try:
+    from .preview_tasks import generate_preview
+except ImportError as e:
+    print(f"Warning: Failed to import preview_tasks: {str(e)}")
+    generate_preview = None
+
 # Update the __all__ list
 __all__ = ['celery_app', 'test_task']
 if process_document:
     __all__.append('process_document')
 if reprocess_document:
     __all__.append('reprocess_document')
+if generate_preview:
+    __all__.append('generate_preview')
+

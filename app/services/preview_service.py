@@ -188,3 +188,29 @@ class PreviewService:
             svg += '</text></svg>'
             
             return f"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}"
+
+    def _generate_preview_internal(self, filename):
+        """Generate preview for a file"""
+        try:
+            # Get the file data from storage
+            file_data = self.storage.get_file(filename)
+            
+            if not file_data:
+                self.logger.error(f"File not found in storage: {filename}")
+                return self._generate_placeholder_preview(f"File not found: {filename}")
+            
+            # Determine file type and generate preview
+            ext = os.path.splitext(filename.lower())[1]
+            
+            if ext in self.supported_images:
+                return self._generate_image_preview(file_data, filename)
+                
+            elif ext in self.supported_pdfs:
+                return self._generate_pdf_preview(file_data, filename)
+                
+            else:
+                return self._generate_placeholder_preview(f"Unsupported file type: {ext}")
+                
+        except Exception as e:
+            self.logger.error(f"Error generating preview for {filename}: {str(e)}", exc_info=True)
+            return self._generate_placeholder_preview("Error generating preview")

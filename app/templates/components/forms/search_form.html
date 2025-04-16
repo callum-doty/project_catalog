@@ -113,7 +113,7 @@
      {% if query %}
      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
        Search: {{ query }}
-       <a href="{{ url_for('main_routes.search_documents', filter_type=filter_type, filter_year=filter_year, filter_location=filter_location) }}" class="ml-1 text-blue-500 hover:text-blue-700">
+       <a href="{{ url_for('search_routes.search_documents', filter_type=filter_type, filter_year=filter_year, filter_location=filter_location) }}" class="ml-1 text-blue-500 hover:text-blue-700">
          <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>
          </svg>
@@ -124,7 +124,7 @@
      {% if filter_type %}
      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
        Type: {{ filter_type|title }}
-       <a href="{{ url_for('main_routes.search_documents', q=query, filter_year=filter_year, filter_location=filter_location) }}" class="ml-1 text-green-500 hover:text-green-700">
+       <a href="{{ url_for('search_routes.search_documents', q=query, filter_year=filter_year, filter_location=filter_location) }}" class="ml-1 text-green-500 hover:text-green-700">
          <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>
          </svg>
@@ -135,7 +135,7 @@
      {% if filter_year %}
      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
        Year: {{ filter_year }}
-       <a href="{{ url_for('main_routes.search_documents', q=query, filter_type=filter_type, filter_location=filter_location) }}" class="ml-1 text-purple-500 hover:text-purple-700">
+       <a href="{{ url_for('search_routes.search_documents', q=query, filter_type=filter_type, filter_location=filter_location) }}" class="ml-1 text-purple-500 hover:text-purple-700">
          <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>
          </svg>
@@ -146,7 +146,7 @@
      {% if filter_location %}
      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
        Location: {{ filter_location }}
-       <a href="{{ url_for('main_routes.search_documents', q=query, filter_type=filter_type, filter_year=filter_year) }}" class="ml-1 text-yellow-500 hover:text-yellow-700">
+       <a href="{{ url_for('search_routes.search_documents', q=query, filter_type=filter_type, filter_year=filter_year) }}" class="ml-1 text-yellow-500 hover:text-yellow-700">
          <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>
          </svg>
@@ -155,7 +155,7 @@
      {% endif %}
     
      {% if filter_type or filter_year or filter_location or query %}
-     <a href="{{ url_for('main_routes.search_documents') }}" class="text-xs text-red-600 hover:text-red-800 ml-2">
+     <a href="{{ url_for('search_routes.search_documents') }}" class="text-xs text-red-600 hover:text-red-800 ml-2">
        Clear all filters
      </a>
      {% endif %}
