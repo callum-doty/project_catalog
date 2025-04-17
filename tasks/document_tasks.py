@@ -237,6 +237,14 @@ def store_analysis_results(document_id: int, response: dict):
             logger.info(f"Stored {len(hierarchical_keywords)} hierarchical keywords for document {document_id}")
         except Exception as e:
             logger.error(f"Error processing hierarchical keywords: {str(e)}")
+
+        try:
+            # Queue embeddings generation
+            from tasks.embedding_tasks import generate_embeddings
+            generate_embeddings.delay(document_id)
+            logger.info(f"Queued embeddings generation for document {document_id}")
+        except Exception as e:
+            logger.error(f"Failed to queue embeddings generation: {str(e)}")
         
         # Commit all changes to database
         db.session.commit()
@@ -248,6 +256,9 @@ def store_analysis_results(document_id: int, response: dict):
         logger.error(f"Error storing analysis results: {str(e)}")
         db.session.rollback()
         raise
+
+
+
 
 
 @celery_app.task(name='tasks.recover_pending_documents')

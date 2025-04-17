@@ -1,6 +1,5 @@
 # app/routes/search_routes.py
 
-from flask import Blueprint, render_template, request, jsonify, current_app, flash
 from sqlalchemy import or_, func, desc, asc, case, text
 import logging
 from flask import Blueprint, render_template, request, session, flash, redirect, url_for, jsonify, current_app
@@ -31,6 +30,11 @@ from app.services.document_service import get_document_count, get_document_count
 from flask_caching import Cache
 from app.utils import search_with_timeout, document_has_column, monitor_query
 from app.services.preview_service import PreviewService
+import numpy as np
+from sqlalchemy.sql.expression import cast
+from sqlalchemy import type_coerce
+from sqlalchemy.types import UserDefinedType
+import asyncio
 
 
 search_routes = Blueprint('search_routes', __name__)
@@ -41,6 +45,10 @@ logger = logging.getLogger(__name__)
 search_times = []
 MAX_SEARCH_TIMES = 100
 
+
+class Vector(UserDefinedType):
+    def get_col_spec(self, **kw):
+        return "VECTOR"
 
 def get_document_hierarchical_keywords(document_id):
     """Get hierarchical keywords for a document"""
@@ -73,8 +81,6 @@ def get_document_hierarchical_keywords(document_id):
 
 
 
-
-
 def record_search_time(response_time):
     """Record a search response time and maintain the list size"""
     global search_times
@@ -82,17 +88,85 @@ def record_search_time(response_time):
     if len(search_times) > MAX_SEARCH_TIMES:
         search_times = search_times[-MAX_SEARCH_TIMES:]
 
+def perform_vector_search(query):
+    """Perform vector-based semantic search with pgvector"""
+    # Import necessary modules
+    from app.services.embeddings_service import EmbeddingsService
+    import asyncio
+    from sqlalchemy import func
+    
+    # Generate embeddings for the query
+    embeddings_service = EmbeddingsService()
+    
+    try:
+        # Run the async function to get query embeddings
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        query_embeddings = loop.run_until_complete(embeddings_service.generate_query_embeddings(query))
+        loop.close()
+        
+        if not query_embeddings:
+            # Fall back to keyword search if embeddings generation fails
+            logger.warning("Vector embeddings generation failed, falling back to keyword search")
+            return perform_keyword_search(query, set([query]))
+            
+        # Use cosine similarity with pgvector
+        # Find documents with similar embeddings using pgvector's <=> operator for cosine distance
+        doc_matches = db.session.query(
+            Document.id,
+            (1 - (Document.embeddings.op('<=>')(query_embeddings))).label('similarity')
+        ).filter(
+            Document.embeddings.is_not(None)
+        ).filter(
+            (1 - (Document.embeddings.op('<=>')(query_embeddings))) > 0.7  # Similarity threshold
+        ).subquery()
+        
+        # Find analysis content with similar embeddings
+        analysis_matches = db.session.query(
+            LLMAnalysis.document_id,
+            (1 - (LLMAnalysis.embeddings.op('<=>')(query_embeddings))).label('similarity')
+        ).filter(
+            LLMAnalysis.embeddings.is_not(None)
+        ).filter(
+            (1 - (LLMAnalysis.embeddings.op('<=>')(query_embeddings))) > 0.7  # Similarity threshold
+        ).subquery()
+        
+        # Combine the results and order by similarity score
+        combined_query = db.session.query(
+            Document.id
+        ).outerjoin(
+            doc_matches, Document.id == doc_matches.c.id
+        ).outerjoin(
+            analysis_matches, Document.id == analysis_matches.c.document_id
+        ).filter(
+            or_(
+                doc_matches.c.id.is_not(None),
+                analysis_matches.c.document_id.is_not(None)
+            )
+        ).order_by(
+            (func.coalesce(doc_matches.c.similarity, 0) + 
+             func.coalesce(analysis_matches.c.similarity, 0)).desc()
+        )
+        
+        return combined_query
+            
+    except Exception as e:
+        logger.error(f"Vector search error: {str(e)}")
+        # Fall back to keyword search on any error
+        return perform_keyword_search(query, set([query]))
+
 
 @search_routes.route('/')
 @monitor_query
 @cache.cached(timeout=60, query_string=True)
 def search_documents():
-    """Search implementation with full-text search capability"""
+    """Search implementation with vector search capability"""
     query = request.args.get('q', '')
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 12, type=int)
     sort_by = request.args.get('sort_by', 'upload_date')
     sort_direction = request.args.get('sort_dir', 'desc')
+    search_mode = request.args.get('mode', 'hybrid')  
 
     filter_type = request.args.get('filter_type', '')
     filter_year = request.args.get('filter_year', '')
@@ -104,54 +178,26 @@ def search_documents():
     taxonomy_facets = {'primary_categories': [], 'subcategories': []}
     taxonomy_terms = []
     formatted_documents = []
+    expanded_query = set() if query else None
+    expanded_terms = []
 
     try:
         base_query = db.session.query(Document.id)
 
         if query:
-            if hasattr(Document, 'search_vector') and document_has_column(Document, 'search_vector'):
-                tsquery = func.plainto_tsquery('english', query)
-                doc_matches = db.session.query(Document.id).filter(
-                    Document.search_vector.op('@@')(tsquery)
-                ).subquery()
-                llm_matches = db.session.query(LLMAnalysis.document_id).filter(
-                    LLMAnalysis.search_vector.op('@@')(tsquery)
-                ).subquery()
-                text_matches = db.session.query(ExtractedText.document_id).filter(
-                    ExtractedText.search_vector.op('@@')(tsquery)
-                ).subquery()
+            expanded_query = expand_search_query(query)
 
-                combined_matches = base_query.join(
-                    doc_matches, Document.id == doc_matches.c.id, isouter=True
-                ).union(
-                    db.session.query(Document.id).join(
-                        llm_matches, Document.id == llm_matches.c.document_id, isouter=True
-                    ),
-                    db.session.query(Document.id).join(
-                        text_matches, Document.id == text_matches.c.document_id, isouter=True
-                    )
-                ).subquery()
-
-                base_query = db.session.query(Document.id).join(
-                    combined_matches, Document.id == combined_matches.c.id
-                )
+            if search_mode == 'keyword' or not os.getenv("OPENAI_API_KEY"):
+                # Use keyword search if no OpenAI API key
+                base_query = perform_keyword_search(query, expanded_query)
+            elif search_mode == 'vector':
+                # Use vector search
+                base_query = perform_vector_search(query)
             else:
-                base_query = base_query.outerjoin(
-                    LLMAnalysis, Document.id == LLMAnalysis.document_id
-                ).outerjoin(
-                    LLMKeyword, LLMAnalysis.id == LLMKeyword.llm_analysis_id
-                ).outerjoin(
-                    ExtractedText, Document.id == ExtractedText.document_id
-                ).filter(
-                    or_(
-                        Document.filename.ilike(f'%{query}%'),
-                        LLMAnalysis.summary_description.ilike(f'%{query}%'),
-                        LLMKeyword.keyword.ilike(f'%{query}%'),
-                        ExtractedText.main_message.ilike(f'%{query}%'),
-                        ExtractedText.supporting_text.ilike(f'%{query}%')
-                    )
-                )
-
+                # Use hybrid search (default)
+                base_query = perform_hybrid_search(query, expanded_query)
+        
+        # Apply filters - your existing filtering logic
         if filter_type:
             base_query = base_query.join(LLMAnalysis, Document.id == LLMAnalysis.document_id, isouter=True)
             if ',' in filter_type:
@@ -280,36 +326,46 @@ def search_documents():
         response_time = (time.time() - start_time) * 1000
         record_search_time(response_time)
 
+        # Handle expanded terms
+        if isinstance(expanded_query, set):
+            expanded_terms = list(expanded_query)
+        elif isinstance(expanded_query, str) and ' | ' in expanded_query:
+            expanded_terms = expanded_query.split(' | ')
+
         # Check for AJAX request
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({
+            # Return JSON for AJAX requests
+            response = jsonify({
                 'results': results,
                 'pagination': pagination,
                 'taxonomy_facets': taxonomy_facets,
-                'matching_terms': [term.to_dict() for term in taxonomy_terms[:5]] if taxonomy_terms else [],
+                'expanded_terms': expanded_terms,
                 'response_time_ms': round(response_time, 2),
                 'query': query
             })
-        
-        # Render HTML for browser requests
-        return render_template(
-            'pages/search.html', 
-            documents=results,
-            pagination=pagination,
-            taxonomy_facets=taxonomy_facets,
-            matching_terms=taxonomy_terms[:5] if taxonomy_terms else [],
-            query=query,
-            sort_by=sort_by,
-            sort_dir=sort_direction,
-            primary_category=primary_category,
-            subcategory=subcategory,
-            filter_type=filter_type,
-            filter_year=filter_year,
-            filter_location=filter_location,
-            response_time_ms=round(response_time, 2)
-        )
-    
-    
+            response.headers['Content-Type'] = 'application/json'
+            return response
+        else:
+            # Return HTML for browser requests
+            return render_template(
+                'pages/search.html', 
+                documents=results,
+                pagination=pagination,
+                taxonomy_facets=taxonomy_facets,
+                expanded_terms=expanded_terms,
+                matching_terms=taxonomy_terms[:5] if taxonomy_terms else [],
+                query=query,
+                sort_by=sort_by,
+                sort_dir=sort_direction,
+                primary_category=primary_category,
+                subcategory=subcategory,
+                filter_type=filter_type,
+                filter_year=filter_year,
+                filter_location=filter_location,
+                filter_options={},  # Add filter options if needed
+                response_time_ms=round(response_time, 2),
+                mode=search_mode  # Pass the search mode to template
+            )
 
     except Exception as e:
         response_time = (time.time() - start_time) * 1000
@@ -317,20 +373,27 @@ def search_documents():
         current_app.logger.error(f"Search error: {str(e)}", exc_info=True)
 
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({
+            # JSON response for AJAX requests
+            response = jsonify({
                 'error': str(e),
                 'results': [],
                 'pagination': None,
+                'expanded_terms': [],
                 'response_time_ms': round(response_time, 2)
             })
-
-        return render_template(
-            'pages/search.html',
-            documents=[],
-            query=query,
-            error=str(e),
-            taxonomy_facets=taxonomy_facets
-        )
+            response.headers['Content-Type'] = 'application/json'
+            return response
+        else:
+            # HTML response for browser requests
+            return render_template(
+                'pages/search.html',
+                documents=[],
+                query=query,
+                error=str(e),
+                taxonomy_facets=taxonomy_facets,
+                expanded_terms=[],
+                matching_terms=[]
+            )
 
 
 
@@ -569,3 +632,73 @@ def record_search_time(response_time):
     search_times.append(response_time)
     if len(search_times) > MAX_SEARCH_TIMES:
         search_times = search_times[-MAX_SEARCH_TIMES:]
+
+
+
+@cache.memoize(timeout=300)
+def expand_search_query(query):
+    """
+    Expand search query with related terms from taxonomy
+    This helps find documents that use different terminology for the same concepts
+    """
+    if not query or len(query.strip()) < 3:
+        return query  # Don't expand very short queries
+        
+    expanded_terms = set([query.lower()])  # Start with original query
+    
+    try:
+        # Find direct matches in taxonomy
+        direct_matches = KeywordTaxonomy.query.filter(
+            KeywordTaxonomy.term.ilike(f"%{query}%")
+        ).all()
+        
+        # Find matches in synonyms
+        synonym_matches = db.session.query(
+            KeywordTaxonomy
+        ).join(
+            KeywordSynonym, KeywordTaxonomy.id == KeywordSynonym.taxonomy_id
+        ).filter(
+            KeywordSynonym.synonym.ilike(f"%{query}%")
+        ).all()
+        
+        # Combine unique matches
+        all_matches = {term.id: term for term in direct_matches + synonym_matches}
+        
+        # Add matched terms and synonyms to expanded terms
+        for term_id, term in all_matches.items():
+            expanded_terms.add(term.term.lower())
+            
+            # Find and add all synonyms
+            synonyms = KeywordSynonym.query.filter_by(taxonomy_id=term.id).all()
+            for syn in synonyms:
+                expanded_terms.add(syn.synonym.lower())
+                
+            # If we have a subcategory, add related terms in the same subcategory
+            if term.subcategory:
+                related_terms = KeywordTaxonomy.query.filter_by(
+                    primary_category=term.primary_category,
+                    subcategory=term.subcategory
+                ).all()
+                
+                for related in related_terms:
+                    expanded_terms.add(related.term.lower())
+        
+        # Remove very short terms (less than 3 chars) and the original query
+        expanded_terms = {term for term in expanded_terms if len(term) >= 3}
+        
+        # Add original query back if it was removed
+        expanded_terms.add(query.lower())
+        
+        logger.info(f"Expanded query '{query}' to: {expanded_terms}")
+        
+        # For PostgreSQL full-text search, format properly
+        if hasattr(Document, 'search_vector'):
+            # Use the | operator for OR in tsquery
+            return " | ".join(expanded_terms)
+        else:
+            # For ILIKE queries, we'll use the expanded terms list directly
+            return expanded_terms
+            
+    except Exception as e:
+        logger.error(f"Error in query expansion: {str(e)}")
+        return query  # Fall back to original query on error
