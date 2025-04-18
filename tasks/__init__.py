@@ -2,7 +2,7 @@
 
 from .celery_app import celery_app
 from .test import test_task
-
+from .embedding_tasks import generate_embeddings
 # Import the tasks
 try:
     from .document_tasks import process_document
@@ -32,4 +32,6 @@ if reprocess_document:
     __all__.append('reprocess_document')
 if generate_preview:
     __all__.append('generate_preview')
+if generate_embeddings:
+    __all__.append('generate_embeddings')
 

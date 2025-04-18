@@ -9,14 +9,26 @@ from app.models.models import Document, LLMAnalysis
 
 logger = logging.getLogger(__name__)
 
+# app/services/embeddings_service.py
+import os
+import httpx
+import numpy as np
+import json
+import logging
+from app.extensions import db, cache
+from app.models.models import Document, LLMAnalysis
+
+logger = logging.getLogger(__name__)
+
 class EmbeddingsService:
     def __init__(self):
         self.api_key = os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             logger.warning("OPENAI_API_KEY environment variable is not set. Vector search will not work.")
         
-        self.model = "text-embedding-ada-002"  # OpenAI's embeddings model
-        self.embedding_dim = 1536  # Dimensions for OpenAI embeddings
+        # Update to use the newer model
+        self.model = "text-embedding-3-small"  # Updated to the newer OpenAI embeddings model
+        self.embedding_dim = 1536  # Dimensions for this model
     
     async def generate_embeddings(self, text):
         """Generate embeddings for text using OpenAI API"""
@@ -36,7 +48,8 @@ class EmbeddingsService:
                     },
                     json={
                         "input": text,
-                        "model": self.model
+                        "model": self.model,
+                        "encoding_format": "float"  # Request float format
                     },
                     timeout=30.0
                 )
@@ -53,13 +66,13 @@ class EmbeddingsService:
             return None
     
     async def generate_and_store_embeddings_for_document(self, document_id):
-        """Generate and store embeddings for a document"""
+        """Generate and store embeddings for a document with enhanced context"""
         document = Document.query.get(document_id)
         if not document:
             logger.error(f"Document not found: {document_id}")
             return False
         
-        # Get text to embed for the document
+        # Build a richer context for embeddings
         text_to_embed = document.filename
         
         # Add analysis text if available
@@ -67,6 +80,18 @@ class EmbeddingsService:
             llm_analysis = document.llm_analysis
             if llm_analysis.summary_description:
                 text_to_embed += " " + llm_analysis.summary_description
+                
+        # Add extracted text if available
+        if hasattr(document, 'extracted_text') and document.extracted_text:
+            if document.extracted_text.text_content:
+                text_to_embed += " " + document.extracted_text.text_content
+            if document.extracted_text.main_message:
+                text_to_embed += " " + document.extracted_text.main_message
+                
+        # Add keywords if available
+        if document.llm_analysis and document.llm_analysis.keywords:
+            keyword_text = " ".join([kw.keyword for kw in document.llm_analysis.keywords if hasattr(kw, 'keyword')])
+            text_to_embed += " " + keyword_text
         
         # Generate embeddings
         embeddings = await self.generate_embeddings(text_to_embed)
@@ -98,5 +123,18 @@ class EmbeddingsService:
     
     @cache.memoize(timeout=300)
     async def generate_query_embeddings(self, query):
-        """Generate embeddings for a search query"""
-        return await self.generate_embeddings(query)
+        """Generate embeddings for a search query with enhanced context"""
+        # Add common related terms for financial queries
+        financial_terms = {
+            "money": "money finances financial currency cash funds fees taxes payments income revenue",
+            "tax": "tax taxes taxation tariff levy duty revenue income",
+            "fee": "fee fees charge cost expense payment price toll",
+            "sale": "sale sales revenue income proceeds profit transaction",
+        }
+        
+        enhanced_query = query
+        for term, context in financial_terms.items():
+            if term.lower() in query.lower():
+                enhanced_query += " " + context
+                
+        return await self.generate_embeddings(enhanced_query)

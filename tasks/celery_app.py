@@ -57,6 +57,7 @@ celery_app.conf.task_routes = {
     'tasks.analyze_document': {'queue': 'analysis'},
     'tasks.generate_preview': {'queue': 'previews'},  
     'tasks.sync_dropbox': {'queue': 'document_processing'}, 
+    'tasks.generate_embeddings': {'queue': 'celery'},
 }
 
 # Verify Redis connection on module import

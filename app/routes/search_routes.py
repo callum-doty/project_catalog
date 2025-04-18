@@ -1,6 +1,6 @@
 # app/routes/search_routes.py
 
-from sqlalchemy import or_, func, desc, asc, case, text
+from sqlalchemy import or_, func, desc, asc, case, text, type_coerce
 import logging
 from flask import Blueprint, render_template, request, session, flash, redirect, url_for, jsonify, current_app
 from werkzeug.utils import secure_filename
@@ -32,9 +32,7 @@ from app.utils import search_with_timeout, document_has_column, monitor_query
 from app.services.preview_service import PreviewService
 import numpy as np
 from sqlalchemy.sql.expression import cast
-from sqlalchemy import type_coerce
 from sqlalchemy.types import UserDefinedType
-import asyncio
 
 
 search_routes = Blueprint('search_routes', __name__)
@@ -93,7 +91,6 @@ def perform_vector_search(query):
     # Import necessary modules
     from app.services.embeddings_service import EmbeddingsService
     import asyncio
-    from sqlalchemy import func
     
     # Generate embeddings for the query
     embeddings_service = EmbeddingsService()
@@ -110,6 +107,9 @@ def perform_vector_search(query):
             logger.warning("Vector embeddings generation failed, falling back to keyword search")
             return perform_keyword_search(query, set([query]))
             
+        # Use a lower threshold to catch more semantic relationships
+        similarity_threshold = 0.5  # Lowered from 0.7
+            
         # Use cosine similarity with pgvector
         # Find documents with similar embeddings using pgvector's <=> operator for cosine distance
         doc_matches = db.session.query(
@@ -118,7 +118,7 @@ def perform_vector_search(query):
         ).filter(
             Document.embeddings.is_not(None)
         ).filter(
-            (1 - (Document.embeddings.op('<=>')(query_embeddings))) > 0.7  # Similarity threshold
+            (1 - (Document.embeddings.op('<=>')(query_embeddings))) > similarity_threshold
         ).subquery()
         
         # Find analysis content with similar embeddings
@@ -128,7 +128,7 @@ def perform_vector_search(query):
         ).filter(
             LLMAnalysis.embeddings.is_not(None)
         ).filter(
-            (1 - (LLMAnalysis.embeddings.op('<=>')(query_embeddings))) > 0.7  # Similarity threshold
+            (1 - (LLMAnalysis.embeddings.op('<=>')(query_embeddings))) > similarity_threshold
         ).subquery()
         
         # Combine the results and order by similarity score
@@ -154,6 +154,107 @@ def perform_vector_search(query):
         logger.error(f"Vector search error: {str(e)}")
         # Fall back to keyword search on any error
         return perform_keyword_search(query, set([query]))
+
+
+def perform_keyword_search(query, expanded_query=None):
+    """
+    Perform keyword-based search using PostgreSQL full-text search or ILIKE
+    """
+    try:
+        # If we have search_vector column available, use full-text search
+        if hasattr(Document, 'search_vector') and hasattr(LLMAnalysis, 'search_vector'):
+            logger.info("Using PostgreSQL full-text search")
+            
+            # Format query for tsquery if it's a string of terms
+            if isinstance(expanded_query, str):
+                search_query = expanded_query
+            elif isinstance(expanded_query, set):
+                search_query = " | ".join(expanded_query)
+            else:
+                search_query = query
+                
+            # Perform full-text search across multiple tables
+            combined_query = db.session.query(
+                Document.id
+            ).outerjoin(
+                LLMAnalysis, Document.id == LLMAnalysis.document_id
+            ).outerjoin(
+                ExtractedText, Document.id == ExtractedText.document_id
+            ).filter(
+                or_(
+                    Document.search_vector.op('@@')(func.to_tsquery('english', search_query)),
+                    LLMAnalysis.search_vector.op('@@')(func.to_tsquery('english', search_query)),
+                    ExtractedText.search_vector.op('@@')(func.to_tsquery('english', search_query))
+                )
+            )
+            
+            return combined_query
+            
+        else:
+            # Fall back to basic ILIKE search
+            logger.info("Using ILIKE search (full-text search not available)")
+            
+            # Prepare search terms
+            if isinstance(expanded_query, set):
+                search_terms = expanded_query
+            else:
+                search_terms = {query}
+                
+            # Build a query that searches across multiple fields
+            combined_query = db.session.query(
+                Document.id
+            ).outerjoin(
+                LLMAnalysis, Document.id == LLMAnalysis.document_id
+            ).outerjoin(
+                ExtractedText, Document.id == ExtractedText.document_id
+            ).outerjoin(
+                DesignElement, Document.id == DesignElement.document_id
+            )
+            
+            # Build conditions for each term and each field
+            conditions = []
+            for term in search_terms:
+                term_conditions = [
+                    Document.filename.ilike(f'%{term}%'),
+                    LLMAnalysis.summary_description.ilike(f'%{term}%'),
+                    LLMAnalysis.campaign_type.ilike(f'%{term}%'),
+                    LLMAnalysis.election_year.ilike(f'%{term}%'),
+                    ExtractedText.text_content.ilike(f'%{term}%'),
+                    ExtractedText.main_message.ilike(f'%{term}%'),
+                    ExtractedText.supporting_text.ilike(f'%{term}%'),
+                    DesignElement.geographic_location.ilike(f'%{term}%')
+                ]
+                conditions.append(or_(*term_conditions))
+            
+            # Add the combined conditions to the query
+            if conditions:
+                combined_query = combined_query.filter(or_(*conditions))
+                
+            return combined_query
+            
+    except Exception as e:
+        logger.error(f"Error in keyword search: {str(e)}", exc_info=True)
+        # Return a simple query that matches on filename as fallback
+        return db.session.query(Document.id).filter(Document.filename.ilike(f'%{query}%'))
+
+
+def perform_hybrid_search(query, expanded_query=None):
+    """
+    Perform hybrid search combining both vector and keyword search approaches
+    """
+    try:
+        # Get results from both search methods
+        keyword_results = perform_keyword_search(query, expanded_query)
+        vector_results = perform_vector_search(query)
+        
+        # Combine results (union)
+        combined_results = keyword_results.union(vector_results)
+        
+        return combined_results
+    except Exception as e:
+        logger.error(f"Error in hybrid search: {str(e)}", exc_info=True)
+        # Fall back to keyword search
+        return perform_keyword_search(query, expanded_query)
 
 
 @search_routes.route('/')

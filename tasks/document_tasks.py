@@ -145,6 +145,8 @@ def process_document(self, filename, minio_path, document_id):
             logger.info(f"Analysis completed successfully")
             
             return True
+
+        
             
         except Exception as e:
             logger.error(f"Document processing failed: {str(e)}", exc_info=True)
@@ -256,9 +258,6 @@ def store_analysis_results(document_id: int, response: dict):
         logger.error(f"Error storing analysis results: {str(e)}")
         db.session.rollback()
         raise
-
-
-
 
 
 @celery_app.task(name='tasks.recover_pending_documents')
