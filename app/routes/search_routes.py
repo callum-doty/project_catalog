@@ -267,13 +267,13 @@ def search_documents():
     per_page = request.args.get('per_page', 12, type=int)
     sort_by = request.args.get('sort_by', 'upload_date')
     sort_direction = request.args.get('sort_dir', 'desc')
-    search_mode = request.args.get('mode', 'hybrid')  
 
     filter_type = request.args.get('filter_type', '')
     filter_year = request.args.get('filter_year', '')
     filter_location = request.args.get('filter_location', '')
     primary_category = request.args.get('primary_category', '')
     subcategory = request.args.get('subcategory', '')
+    specific_term = request.args.get('specific_term', '')
 
     start_time = time.time()
     taxonomy_facets = {'primary_categories': [], 'subcategories': []}
@@ -287,16 +287,7 @@ def search_documents():
 
         if query:
             expanded_query = expand_search_query(query)
-
-            if search_mode == 'keyword' or not os.getenv("OPENAI_API_KEY"):
-                # Use keyword search if no OpenAI API key
-                base_query = perform_keyword_search(query, expanded_query)
-            elif search_mode == 'vector':
-                # Use vector search
-                base_query = perform_vector_search(query)
-            else:
-                # Use hybrid search (default)
-                base_query = perform_hybrid_search(query, expanded_query)
+            base_query = perform_hybrid_search(query, expanded_query)
         
         # Apply filters - your existing filtering logic
         if filter_type:
@@ -327,6 +318,9 @@ def search_documents():
             )
             if subcategory:
                 taxonomy_query = taxonomy_query.filter(KeywordTaxonomy.subcategory == subcategory)
+
+            if specific_term:
+                taxonomy_query = taxonomy_query.filter(KeywordTaxonomy.term == specific_term)
 
             taxonomy_ids = taxonomy_query.subquery()
             base_query = base_query.join(taxonomy_ids, Document.id == taxonomy_ids.c.document_id)
@@ -423,7 +417,7 @@ def search_documents():
             }
             results.append(formatted_doc)
 
-        taxonomy_facets = generate_taxonomy_facets(primary_category, subcategory)
+        taxonomy_facets = generate_taxonomy_facets(primary_category, subcategory, specific_term)
         response_time = (time.time() - start_time) * 1000
         record_search_time(response_time)
 
@@ -460,12 +454,13 @@ def search_documents():
                 sort_dir=sort_direction,
                 primary_category=primary_category,
                 subcategory=subcategory,
+                specific_term=specific_term,
                 filter_type=filter_type,
                 filter_year=filter_year,
                 filter_location=filter_location,
                 filter_options={},  # Add filter options if needed
-                response_time_ms=round(response_time, 2),
-                mode=search_mode  # Pass the search mode to template
+                response_time_ms=round(response_time, 2)
+                
             )
 
     except Exception as e:
@@ -578,24 +573,24 @@ def get_document_hierarchical_keywords_bulk(document_ids):
         current_app.logger.error(f"Error getting hierarchical keywords: {str(e)}")
         return {doc_id: [] for doc_id in document_ids}
 
-def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None):
-    """Generate taxonomy facets with more efficient queries"""
+@cache.memoize(timeout=300)
+def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None, selected_term=None):
+    """Generate taxonomy facets for sidebar filtering with terms"""
     try:
-        from app.models.keyword_models import KeywordTaxonomy, DocumentKeyword
-        
-        # Use count queries with joins optimized by added indexes
-        
-        # For primary categories, add a CTE for used taxonomies
-        used_taxonomies = db.session.query(
+        # Create a CTE for documents that have keywords
+        docs_with_keywords = db.session.query(
+            DocumentKeyword.taxonomy_id, 
+            func.count(DocumentKeyword.document_id.distinct()).label('doc_count')
+        ).group_by(
             DocumentKeyword.taxonomy_id
-        ).distinct().subquery()
+        ).cte('docs_with_keywords')
         
-        # Get primary categories with counts, only for taxonomies actually in use
+        # Get primary categories with counts
         primary_categories = db.session.query(
             KeywordTaxonomy.primary_category,
-            func.count(KeywordTaxonomy.id.distinct()).label('count')
+            func.sum(docs_with_keywords.c.doc_count).label('count')
         ).join(
-            used_taxonomies, KeywordTaxonomy.id == used_taxonomies.c.taxonomy_id
+            docs_with_keywords, KeywordTaxonomy.id == docs_with_keywords.c.taxonomy_id
         ).group_by(
             KeywordTaxonomy.primary_category
         ).order_by(
@@ -611,11 +606,28 @@ def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None):
             ).filter(
                 KeywordTaxonomy.primary_category == selected_primary
             ).join(
-                used_taxonomies, KeywordTaxonomy.id == used_taxonomies.c.taxonomy_id
+                DocumentKeyword, KeywordTaxonomy.id == DocumentKeyword.taxonomy_id
             ).group_by(
                 KeywordTaxonomy.subcategory
             ).order_by(
                 KeywordTaxonomy.subcategory
+            ).all()
+        
+        # If both primary category and subcategory are selected, get specific terms
+        terms = []
+        if selected_primary and selected_subcategory:
+            terms = db.session.query(
+                KeywordTaxonomy.term,
+                func.count(DocumentKeyword.document_id.distinct()).label('count')
+            ).filter(
+                KeywordTaxonomy.primary_category == selected_primary,
+                KeywordTaxonomy.subcategory == selected_subcategory
+            ).join(
+                DocumentKeyword, KeywordTaxonomy.id == DocumentKeyword.taxonomy_id
+            ).group_by(
+                KeywordTaxonomy.term
+            ).order_by(
+                KeywordTaxonomy.term
             ).all()
         
         # Format results
@@ -627,13 +639,17 @@ def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None):
             'subcategories': [
                 {'name': subcat, 'count': count, 'selected': subcat == selected_subcategory}
                 for subcat, count in subcategories
-            ] if selected_primary else []
+            ] if selected_primary else [],
+            'terms': [
+                {'name': term, 'count': count, 'selected': term == selected_term}
+                for term, count in terms
+            ] if selected_primary and selected_subcategory else []
         }
         
         return result
     except Exception as e:
-        current_app.logger.error(f"Error generating taxonomy facets: {str(e)}")
-        return {'primary_categories': [], 'subcategories': []}
+        logger.error(f"Error generating taxonomy facets: {str(e)}")
+        return {'primary_categories': [], 'subcategories': [], 'terms': []}
 
 @search_routes.route('/api/search-feedback', methods=['POST'])
 def submit_search_feedback():

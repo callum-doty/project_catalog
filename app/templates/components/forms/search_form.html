@@ -1,180 +1,76 @@
 <!-- templates/components/forms/search_form.html -->
-{% macro search_form(query='', filter_options=None, filter_type='', filter_year='', filter_location='') %}
+{% macro search_form(query='', filter_options=None) %}
 <div class="bg-white p-4 rounded-lg shadow-md mb-6">
- <form id="searchForm" autocomplete="off">
-   <!-- Main search bar -->
-   <div class="flex gap-2 mb-4">
-     <div class="flex-1 relative">
-       <input
-         type="search"
-         name="q"
-         id="search_input"
-         value="{{ query }}"
-         placeholder="Search documents..."
-         class="w-full px-4 py-2 pl-10 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-       />
-       <div
-         class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
-       >
-         <svg
-           class="h-5 w-5 text-gray-400"
-           xmlns="http://www.w3.org/2000/svg"
-           viewBox="0 0 20 20"
-           fill="currentColor"
-         >
-           <path
-             fill-rule="evenodd"
-             d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z"
-             clip-rule="evenodd"
-           />
-         </svg>
-       </div>
-     </div>
-     <button
-       type="submit"
-       class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center"
-     >
-       <span>Search</span>
-     </button>
-   </div>
+  <form id="searchForm" autocomplete="off">
+    <!-- Main search bar -->
+    <div class="flex gap-2 mb-4">
+      <div class="flex-1 relative">
+        <input
+          type="search"
+          name="q"
+          id="search_input"
+          value="{{ query }}"
+          placeholder="Search documents..."
+          class="w-full px-4 py-2 pl-10 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <div
+          class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
+        >
+          <svg
+            class="h-5 w-5 text-gray-400"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+          >
+            <path
+              fill-rule="evenodd"
+              d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z"
+              clip-rule="evenodd"
+            />
+          </svg>
+        </div>
+      </div>
+      <button
+        type="submit"
+        class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center"
+      >
+        <span>Search</span>
+      </button>
+    </div>
 
-   <div>
-    <label for="search_mode" class="block text-sm font-medium text-gray-700 mb-1">Search Mode</label>
-    <select
-      id="search_mode"
-      name="mode"
-      class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
-      onchange="this.form.submit()"
-    >
-      <option value="hybrid" {% if mode == 'hybrid' %}selected{% endif %}>Hybrid (Keyword + Semantic)</option>
-      <option value="keyword" {% if mode == 'keyword' %}selected{% endif %}>Keyword Only</option>
-      <option value="vector" {% if mode == 'vector' %}selected{% endif %}>Semantic Only</option>
-    </select>
-  </div>
+    <!-- Active filters display -->
+    {% if query %}
+    <div class="mt-4 flex flex-wrap gap-2">
+      <span class="text-sm text-gray-600">Active filters:</span>
 
-
-   <!-- Advanced filters -->
-   <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-     <!-- Document Type Filter -->
-     <div>
-       <label for="filter_type" class="block text-sm font-medium text-gray-700 mb-1">Document Type</label>
-       <select
-         id="filter_type"
-         name="filter_type"
-         class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
-         onchange="this.form.submit()"
-       >
-         <option value="">All Types</option>
-         {% if filter_options and filter_options.document_types %}
-           {% for doc_type in filter_options.document_types %}
-             <option value="{{ doc_type[0] }}" {% if filter_type == doc_type[0] %}selected{% endif %}>
-               {{ doc_type[0]|title }}
-             </option>
-           {% endfor %}
-         {% endif %}
-       </select>
-     </div>
-
-
-     <!-- Election Year Filter -->
-     <div>
-       <label for="filter_year" class="block text-sm font-medium text-gray-700 mb-1">Election Year</label>
-       <select
-         id="filter_year"
-         name="filter_year"
-         class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
-         onchange="this.form.submit()"
-       >
-         <option value="">All Years</option>
-         {% if filter_options and filter_options.years %}
-           {% for year in filter_options.years %}
-             <option value="{{ year[0] }}" {% if filter_year == year[0] %}selected{% endif %}>
-               {{ year[0] }}
-             </option>
-           {% endfor %}
-         {% endif %}
-       </select>
-     </div>
-
-
-     <!-- Location Filter -->
-     <div>
-       <label for="filter_location" class="block text-sm font-medium text-gray-700 mb-1">Location</label>
-       <select
-         id="filter_location"
-         name="filter_location"
-         class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
-         onchange="this.form.submit()"
-       >
-         <option value="">All Locations</option>
-         {% if filter_options and filter_options.locations %}
-           {% for location in filter_options.locations %}
-             <option value="{{ location[0] }}" {% if filter_location == location[0] %}selected{% endif %}>
-               {{ location[0] }}
-             </option>
-           {% endfor %}
-         {% endif %}
-       </select>
-     </div>
-   </div>
-
-
-   <!-- Active filters display -->
-   {% if filter_type or filter_year or filter_location or query %}
-   <div class="mt-4 flex flex-wrap gap-2">
-     <span class="text-sm text-gray-600">Active filters:</span>
-    
-     {% if query %}
-     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-       Search: {{ query }}
-       <a href="{{ url_for('search_routes.search_documents', filter_type=filter_type, filter_year=filter_year, filter_location=filter_location) }}" class="ml-1 text-blue-500 hover:text-blue-700">
-         <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-           <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>
-         </svg>
-       </a>
-     </span>
-     {% endif %}
-    
-     {% if filter_type %}
-     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-       Type: {{ filter_type|title }}
-       <a href="{{ url_for('search_routes.search_documents', q=query, filter_year=filter_year, filter_location=filter_location) }}" class="ml-1 text-green-500 hover:text-green-700">
-         <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-           <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>
-         </svg>
-       </a>
-     </span>
-     {% endif %}
-    
-     {% if filter_year %}
-     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-       Year: {{ filter_year }}
-       <a href="{{ url_for('search_routes.search_documents', q=query, filter_type=filter_type, filter_location=filter_location) }}" class="ml-1 text-purple-500 hover:text-purple-700">
-         <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-           <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>
-         </svg>
-       </a>
-     </span>
-     {% endif %}
-    
-     {% if filter_location %}
-     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-       Location: {{ filter_location }}
-       <a href="{{ url_for('search_routes.search_documents', q=query, filter_type=filter_type, filter_year=filter_year) }}" class="ml-1 text-yellow-500 hover:text-yellow-700">
-         <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-           <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>
-         </svg>
-       </a>
-     </span>
-     {% endif %}
-    
-     {% if filter_type or filter_year or filter_location or query %}
-     <a href="{{ url_for('search_routes.search_documents') }}" class="text-xs text-red-600 hover:text-red-800 ml-2">
-       Clear all filters
-     </a>
-     {% endif %}
-   </div>
-   {% endif %}
- </form>
+      {% if query %}
+      <span
+        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+      >
+        Search: {{ query }}
+        <a
+          href="{{ url_for('search_routes.search_documents') }}"
+          class="ml-1 text-blue-500 hover:text-blue-700"
+        >
+          <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+            <path
+              fill-rule="evenodd"
+              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+              clip-rule="evenodd"
+            ></path>
+          </svg>
+        </a>
+      </span>
+      {% endif %} {% if query %}
+      <a
+        href="{{ url_for('search_routes.search_documents') }}"
+        class="text-xs text-red-600 hover:text-red-800 ml-2"
+      >
+        Clear search
+      </a>
+      {% endif %}
+    </div>
+    {% endif %}
+  </form>
 </div>
 {% endmacro %}
