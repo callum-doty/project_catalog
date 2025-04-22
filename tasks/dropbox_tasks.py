@@ -1,7 +1,8 @@
 # tasks/dropbox_tasks.py
 
 from celery import shared_task
-from .celery_app import celery_app, logger, TASK_STATUSES
+from .celery_app import celery_app, logger
+from app.constants import DOCUMENT_STATUSES
 from app.services.dropbox_service import DropboxService
 from app.models.models import Document, DropboxSync
 from app.extensions import db
@@ -153,7 +154,7 @@ def sync_dropbox(self):
                         filename=file_name,
                         upload_date=datetime.utcnow(),
                         file_size=file_size,
-                        status=TASK_STATUSES['PENDING'],
+                        status=DOCUMENT_STATUSES['PENDING'],
                         page_count=1
                     )
                     db.session.add(document)

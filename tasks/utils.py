@@ -1,16 +1,9 @@
 # tasks/utils.py
 import functools
 import logging
+from app.constants import DOCUMENT_STATUSES
 
 logger = logging.getLogger(__name__)
-
-# Task status tracking
-TASK_STATUSES = {
-    'PENDING': 'PENDING',
-    'PROCESSING': 'PROCESSING',
-    'COMPLETED': 'COMPLETED',
-    'FAILED': 'FAILED'
-}
 
 def handle_task_failure(task_func):
     @functools.wraps(task_func)
@@ -26,7 +19,7 @@ def handle_task_failure(task_func):
                 if document_id:
                     doc = Document.query.get(document_id)
                     if doc:
-                        doc.status = TASK_STATUSES['FAILED']
+                        doc.status = DOCUMENT_STATUSES['FAILED'] 
                         db.session.commit()
             except Exception as db_error:
                 logger.error(f"Failed to update document status: {str(db_error)}")

@@ -9,6 +9,7 @@ except ImportError:
 import os
 import sys
 import logging
+from app.constants import DOCUMENT_STATUSES, QUEUE_NAMES
 
 # Setup basic logging
 logging.basicConfig(level=logging.INFO)
@@ -43,21 +44,14 @@ celery_app.conf.update(
     enable_utc=True,
 )
 
-# Task status tracking - add this back
-TASK_STATUSES = {
-    'PENDING': 'PENDING',
-    'PROCESSING': 'PROCESSING',
-    'COMPLETED': 'COMPLETED',
-    'FAILED': 'FAILED'
-}
 
 # Configure task routing
 celery_app.conf.task_routes = {
-    'tasks.process_document': {'queue': 'document_processing'},
-    'tasks.analyze_document': {'queue': 'analysis'},
-    'tasks.generate_preview': {'queue': 'previews'},  
-    'tasks.sync_dropbox': {'queue': 'document_processing'}, 
-    'tasks.generate_embeddings': {'queue': 'celery'},
+    'tasks.process_document': {'queue': QUEUE_NAMES['DOCUMENT_PROCESSING']},
+    'tasks.analyze_document': {'queue': QUEUE_NAMES['ANALYSIS']},
+    'tasks.generate_preview': {'queue': QUEUE_NAMES['PREVIEWS']},
+    'tasks.sync_dropbox': {'queue': QUEUE_NAMES['DOCUMENT_PROCESSING']},
+    'tasks.generate_embeddings': {'queue': QUEUE_NAMES['DEFAULT']},
 }
 
 # Verify Redis connection on module import

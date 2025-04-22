@@ -27,6 +27,9 @@ from app.extensions import cache
 from app.services.document_service import get_document_count, get_document_counts_by_status
 from flask_caching import Cache
 from app.utils import search_with_timeout, document_has_column, monitor_query
+from app.utils.query_builders import get_failed_documents_query
+from app.utils.query_builders import get_document_statistics, build_document_with_relationships_query, apply_sorting, get_stuck_documents_query
+from app.constants import CACHE_TIMEOUTS
 
 
 
@@ -133,7 +136,11 @@ def dashboard():
 @main_routes.route('/home')
 def home():
     try:
-        documents = Document.query.order_by(Document.upload_date.desc()).limit(10).all()
+        # Get recent documents with relationships, sorted by upload date
+        documents_query = build_document_with_relationships_query()
+        documents_query = apply_sorting(documents_query, 'upload_date', 'desc')
+        documents = documents_query.limit(10).all()
+        
         formatted_docs = []
         
         for doc in documents:
@@ -347,49 +354,19 @@ def reprocess_document(document_id):
 
 
 @main_routes.route('/metrics-dashboard')
+@cache.cached(timeout=CACHE_TIMEOUTS['METRICS'])
 def metrics_dashboard():
     """Dashboard for system KPIs and metrics"""
     try:
-        from app.models.models import Document, LLMAnalysis, Classification, ExtractedText
+        start_time = time.time()
         
         # Time period for metrics (default: last 30 days)
         days = request.args.get('days', 30, type=int)
-        time_period = datetime.utcnow() - timedelta(days=days)
         
-        # Base query for recent documents
-        base_query = Document.query.filter(Document.upload_date >= time_period)
-        total_docs = base_query.count()
+        # Get document statistics using query builder
+        document_metrics = get_document_statistics(days=days)
         
-        # Document processing metrics
-        start_time = time.time()
-        
-        metrics = {
-            'document_counts': {},
-            'processing_times': {},
-            'confidence_scores': {},
-            'daily_processing': [],
-            'file_types': {},
-            'processing_success_rate': 0
-        }
-        
-        # Calculate processing counts
-        metrics['document_counts'] = {
-            'total': total_docs,
-            'completed': base_query.filter(Document.status == 'COMPLETED').count(),
-            'failed': base_query.filter(Document.status == 'FAILED').count(),
-            'pending': base_query.filter(Document.status == 'PENDING').count(),
-            'processing': base_query.filter(Document.status == 'PROCESSING').count()
-        }
-        
-        # Calculate success rate
-        if total_docs > 0:
-            metrics['processing_success_rate'] = (metrics['document_counts']['completed'] / total_docs) * 100
-        
-        # Document processing times
-        # This requires adding processing_time field to Document or calculating from logs
-        # Estimate based on document metadata
-        
-        # Confidence scores for different components
+        # Get confidence scores
         confidence_query = db.session.query(
             func.avg(LLMAnalysis.confidence_score).label('llm_confidence'),
             func.avg(Classification.confidence).label('classification_confidence'),
@@ -398,11 +375,9 @@ def metrics_dashboard():
             Classification, Classification.document_id == LLMAnalysis.document_id, isouter=True
         ).join(
             ExtractedText, ExtractedText.document_id == LLMAnalysis.document_id, isouter=True
-        ).filter(
-            LLMAnalysis.analysis_date >= time_period
         ).first()
         
-        metrics['confidence_scores'] = {
+        confidence_scores = {
             'text_extraction': round((confidence_query.extraction_confidence or 0) * 100, 2),
             'classification': round((confidence_query.classification_confidence or 0), 2),
             'llm_analysis': round((confidence_query.llm_confidence or 0) * 100, 2)
@@ -413,68 +388,26 @@ def metrics_dashboard():
             func.lower(func.substring(Document.filename, func.length(Document.filename) - 3, 4)).label('extension'),
             func.count().label('count')
         ).filter(
-            Document.upload_date >= time_period
+            Document.upload_date >= datetime.utcnow() - timedelta(days=days)
         ).group_by(
             text('extension')
         ).all()
-
-        # Convert to a Python dictionary explicitly
-        metrics['file_types'] = {ext: count for ext, count in file_extensions}
-
-        # Calculate query time for metrics
-        metrics['metrics_query_time'] = round((time.time() - start_time) * 1000, 2)  # in ms
-
-        # Add convenience keys for templates
-        metrics['file_type_keys'] = list(metrics['file_types'].keys())
-        metrics['file_type_values'] = list(metrics['file_types'].values())
-
-        # Debug output
-        print("Metrics keys:", metrics.keys())
-        for key, value in metrics.items():
-            print(f"{key}: {type(value)}")
         
-        # Daily document processing volume
-        daily_processing = db.session.query(
-            func.date(Document.upload_date).label('date'),
-            func.count().label('total'),
-            func.sum(case((Document.status == 'COMPLETED', 1), else_=0)).label('completed'),
-            func.sum(case((Document.status == 'FAILED', 1), else_=0)).label('failed')
-        ).filter(
-            Document.upload_date >= time_period
-        ).group_by(
-            text('date')
-        ).order_by(
-            text('date')
-        ).all()
+        file_types = {ext: count for ext, count in file_extensions}
         
-        metrics['daily_processing'] = [
-            {
-                'date': date.strftime('%Y-%m-%d'),
-                'total': total,
-                'completed': completed,
-                'failed': failed,
-                'success_rate': (completed / total * 100) if total > 0 else 0
-            }
-            for date, total, completed, failed in daily_processing
-        ]
-        
-        # Estimate search response time (placeholder)
-        metrics['search_response_time'] = "< 500ms"  # This is a placeholder
-        
-        # Average PDF processing time (placeholder - would need timing data)
-        metrics['processing_times'] = {
-            'pdf': "~10-15 seconds",
-            'image': "~5-10 seconds",
-            'average': "~12 seconds"
+        # Combine all metrics
+        metrics = {
+            **document_metrics,
+            'confidence_scores': confidence_scores,
+            'file_types': file_types,
+            'processing_times': {
+                'pdf': "~10-15 seconds",
+                'image': "~5-10 seconds",
+                'average': "~12 seconds"
+            },
+            'search_response_time': "< 500ms",
+            'metrics_query_time': round((time.time() - start_time) * 1000, 2)
         }
-        
-        # Calculate query time for metrics
-        print(f"metrics['file_types'] type: {type(metrics['file_types'])}")
-
-
-        print("Metrics keys:", metrics.keys())
-        for key, value in metrics.items():
-            print(f"{key}: {type(value)}")
         
         return render_template('pages/metrics.html', 
                               metrics=metrics,
@@ -532,8 +465,8 @@ def get_search_response_time():
 def recovery_dashboard():
     """Display failed documents for recovery"""
     try:
-        # Get all documents with FAILED status
-        failed_documents = Document.query.filter_by(status='FAILED').order_by(Document.upload_date.desc()).all()
+       
+        failed_documents = get_failed_documents_query().all()
         
         # Prepare data for template
         documents_data = []
@@ -566,31 +499,18 @@ def recovery_dashboard():
 def recover_pending():
     """Display pending documents that might be stuck for recovery"""
     try:
-        # Get all documents with PENDING or PROCESSING status
-        pending_documents = Document.query.filter(
-            Document.status.in_(['PENDING', 'PROCESSING'])
-        ).order_by(Document.upload_date.desc()).all()
+        # Use query builder for stuck documents (pending for more than 1 hour)
+        stuck_documents = get_stuck_documents_query(hours=1).all()
         
         # Prepare data for template
         documents_data = []
         
-        for doc in pending_documents:
-            # Calculate time since upload - handle timezone-aware dates correctly
-            if doc.upload_date.tzinfo:
-                # If doc.upload_date is timezone-aware, make utcnow timezone-aware too
-                from datetime import timezone
-                current_time = datetime.utcnow().replace(tzinfo=timezone.utc)
-            else:
-                # If doc.upload_date is naive, use naive utcnow
-                current_time = datetime.utcnow()
-                
-            time_since_upload = current_time - doc.upload_date
+        for doc in stuck_documents:
+            # Calculate time since upload
+            time_since_upload = datetime.utcnow() - doc.upload_date
             hours_pending = time_since_upload.total_seconds() / 3600
             
-            # Only show documents that have been pending for more than 1 hour
-            if hours_pending < 1:
-                continue
-                
+            # Get preview
             preview = None
             try:
                 preview = preview_service.get_preview(doc.filename)

@@ -7,17 +7,20 @@ from celery import Task
 from .celery_app import celery_app
 from .task_base import DocumentProcessor
 from .celery_app import celery_app, logger
-from .utils import TASK_STATUSES
 from app.models.models import Document, LLMAnalysis, LLMKeyword, Classification, DesignElement, ExtractedText, DropboxSync, Entity, CommunicationFocus
 from datetime import datetime, timedelta
-from app.extensions import db
+from app.extensions import db, cache
+from app.services.preview_service import PreviewService
+from app.services.search_service import SearchService
 from app.services.storage_service import MinIOStorage
 import logging
 from app.extensions import cache
+from app.constants import DOCUMENT_STATUSES
 
 
 
 
+search_service = SearchService()
 logger = logging.getLogger(__name__)
 
 
@@ -74,7 +77,7 @@ def test_document_processing(self, document_id):
             doc = Document.query.get(document_id)
             if doc:
                 logger.info(f"Found document: {doc.filename}")
-                doc.status = TASK_STATUSES['COMPLETED']
+                doc.status = DOCUMENT_STATUSES['COMPLETED']
                 db.session.commit()
                 logger.info("Document status updated to COMPLETED")
                 return True
@@ -84,21 +87,41 @@ def test_document_processing(self, document_id):
     except Exception as e:
         logger.error(f"Error in test processing: {str(e)}", exc_info=True)
         raise
+
+
+preview_service = PreviewService()
 def invalidate_document_cache(document_id):
     """Invalidate all cache related to a specific document"""
-    # Invalidate hierarchical keywords cache
-    cache.delete_memoized(get_document_hierarchical_keywords, document_id)
+    # Import the SearchService here to avoid circular imports
+    from app.services.search_service import SearchService
+    search_service = SearchService()
     
-    # Invalidate document preview cache
-    document = Document.query.get(document_id)
-    if document:
-        cache.delete_memoized(preview_service.get_preview, document.filename)
-    
-    # Force regeneration of taxonomy facets
-    cache.delete_memoized(generate_taxonomy_facets)
-    
-    # Clear search cache (this is a broader invalidation)
-    cache.clear()
+    try:
+        # Invalidate document preview cache
+        document = Document.query.get(document_id)
+        if document:
+            # Clear preview cache for this document
+            cache_key = f"preview:{document.filename}"
+            cache.delete(cache_key)
+        
+        # Clear any memoized cache related to search
+        # Using a broader approach to avoid specific function references
+        if hasattr(cache, 'delete_memoized'):
+            # If a search service exists with these methods, clear them
+            if hasattr(search_service, 'get_document_hierarchical_keywords_bulk'):
+                cache.delete_memoized(search_service.get_document_hierarchical_keywords_bulk)
+            
+            if hasattr(search_service, 'generate_taxonomy_facets'):
+                cache.delete_memoized(search_service.generate_taxonomy_facets)
+        
+        # Finally, clear the entire cache to be safe
+        cache.clear()
+        
+    except Exception as e:
+        # Log but don't fail if cache invalidation has issues
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error invalidating cache for document {document_id}: {str(e)}")
 
 
 @celery_app.task(bind=True, base=DocumentProcessorTask, name='tasks.process_document')
@@ -120,7 +143,7 @@ def process_document(self, filename, minio_path, document_id):
             logger.error(f"Document with ID {document_id} not found")
             return False
             
-        doc.status = TASK_STATUSES['PROCESSING']
+        doc.status = DOCUMENT_STATUSES['PROCESSING']
         db.session.commit()
         logger.info(f"Updated document status to PROCESSING")
         
@@ -140,7 +163,7 @@ def process_document(self, filename, minio_path, document_id):
             store_analysis_results(document_id, response)
             
             # Update status and commit
-            doc.status = TASK_STATUSES['COMPLETED']
+            doc.status = DOCUMENT_STATUSES['COMPLETED']
             db.session.commit()
             logger.info(f"Analysis completed successfully")
             
@@ -150,7 +173,7 @@ def process_document(self, filename, minio_path, document_id):
             
         except Exception as e:
             logger.error(f"Document processing failed: {str(e)}", exc_info=True)
-            doc.status = TASK_STATUSES['FAILED']
+            doc.status = DOCUMENT_STATUSES['FAILED']
             db.session.commit()
             raise
 

@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Optional
 from app.services.analysis_prompt import get_analysis_prompt
 from celery.utils.log import get_task_logger
 import backoff
+from app.constants import MODEL_SETTINGS, ERROR_MESSAGES
 
 try:
     import backoff
@@ -32,7 +33,7 @@ class LLMService:
     def __init__(self):
         self.api_key = os.getenv("CLAUDE_API_KEY")
         if not self.api_key:
-            raise ValueError("CLAUDE_API_KEY environment variable is not set")
+            raise ValueError(ERROR_MESSAGES['AUTHENTICATION_FAILED'])
         
         self.headers = {
             "anthropic-version": "2023-06-01",
@@ -41,7 +42,7 @@ class LLMService:
         }
         
         # Default to the Claude 3 Opus model
-        self.model = os.getenv("CLAUDE_MODEL", "claude-3-opus-20240229")
+        self.model = os.getenv("CLAUDE_MODEL", MODEL_SETTINGS['CLAUDE']['MODEL'])
         logger.info(f"Using Claude model: {self.model}")
 
     def _encode_image(self, image_path: str) -> str:

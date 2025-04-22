@@ -17,21 +17,23 @@ def generate_preview(filename, document_id=None):
     logger.info(f"Generating preview for {filename} in background task")
     
     try:
-        # Generate the preview
-        preview_data = preview_service._generate_preview_internal(filename)
-        
-        # Use the Flask app context to set the cache
+        # Create Flask app context
         from app import create_app
+        from app.services.preview_service import PreviewService
         from app.extensions import cache
         
         app = create_app()
         with app.app_context():
+            preview_service = PreviewService()
+            preview_data = preview_service._generate_preview_internal(filename)
+            
             # Store the preview in cache with a long timeout (1 day)
             cache_key = f"preview:{filename}"
             cache.set(cache_key, preview_data, timeout=86400)
             
-            # Update preview status in document if document_id provided
+            # Update document if ID provided
             if document_id:
+                from app.models.models import Document
                 document = Document.query.get(document_id)
                 if document:
                     document.has_preview = True

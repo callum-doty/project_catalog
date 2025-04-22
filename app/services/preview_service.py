@@ -11,15 +11,16 @@ import tempfile
 from werkzeug.utils import secure_filename
 import traceback
 from app.extensions import cache, db
+from app.constants import CACHE_TIMEOUTS, SUPPORTED_FILE_TYPES
 
 class PreviewService:
     def __init__(self):
         self.storage = MinIOStorage()
-        self.supported_images = ['.jpg', '.jpeg', '.png', '.gif']
-        self.supported_pdfs = ['.pdf']
+        self.supported_images = SUPPORTED_FILE_TYPES['IMAGES']
+        self.supported_pdfs = SUPPORTED_FILE_TYPES['DOCUMENTS']
         self.logger = logging.getLogger(__name__)
     
-    @cache.memoize(timeout=3600)
+    @cache.memoize(timeout=CACHE_TIMEOUTS['PREVIEW'])
         
     def get_preview(self, filename):
         """Get preview for a file, first checking cache"""

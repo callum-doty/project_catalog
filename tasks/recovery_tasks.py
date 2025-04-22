@@ -1,8 +1,9 @@
 # tasks/recovery_tasks.py
 
-from .celery_app import celery_app, logger, TASK_STATUSES
+from .celery_app import celery_app, logger
 from app.models.models import Document
 from app.extensions import db
+from app.constants import DOCUMENT_STATUSES
 
 @celery_app.task(name='tasks.reprocess_document', bind=True)
 def reprocess_document(self, filename: str, minio_path: str, document_id: int):
@@ -21,7 +22,7 @@ def reprocess_document(self, filename: str, minio_path: str, document_id: int):
             return False
             
         # Update status to PENDING
-        doc.status = TASK_STATUSES['PENDING']
+        doc.status = DOCUMENT_STATUSES['PENDING']  # Use imported constant
         db.session.commit()
         
         # Call the regular processing task
