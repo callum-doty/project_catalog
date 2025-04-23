@@ -1,8 +1,7 @@
 # app/constants.py
 """
 This module serves as the single source of truth for all constants used 
-throughout the application. Instead of defining constants in multiple files,
-import them from here.
+throughout the application. 
 
 """
 
@@ -12,6 +11,12 @@ DOCUMENT_STATUSES = {
     'PROCESSING': 'PROCESSING',
     'COMPLETED': 'COMPLETED',
     'FAILED': 'FAILED'
+}
+
+DROPBOX_SYNC_SETTINGS = {
+    'DOCUMENT_PROCESSING_DELAY': 40,  # seconds between batches
+    'DROPBOX_BATCH_SIZE': 5,          # documents per batch
+    'MAX_CONCURRENT_PROCESSING': 3    # maximum concurrent processing tasks
 }
 
 # Cache Timeouts (in seconds)

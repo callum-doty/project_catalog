@@ -762,3 +762,49 @@ def sync_status():
             'error': str(e),
             'dropbox_connected': False
         }), 500
+
+@main_routes.route('/document/<path:filename>')
+def view_document(filename):
+    """Serve the document file from storage for viewing in the browser"""
+    try:
+        # Get the file data from MinIO
+        from app.services.storage_service import MinIOStorage
+        storage = MinIOStorage()
+        
+        # Log the request
+        current_app.logger.info(f"Fetching document file: {filename}")
+        
+        # Get the file data
+        file_data = storage.get_file(filename)
+        
+        if not file_data:
+            current_app.logger.error(f"Document file not found: {filename}")
+            flash('Document not found', 'error')
+            return redirect(url_for('main_routes.search_documents'))
+        
+        # Get file extension and set correct mime type
+        ext = os.path.splitext(filename.lower())[1]
+        mime_type = 'application/pdf'
+        if ext in ['.jpg', '.jpeg']:
+            mime_type = 'image/jpeg'
+        elif ext == '.png':
+            mime_type = 'image/png'
+        
+        # Return the file with appropriate content type
+        response = current_app.response_class(
+            file_data,
+            mimetype=mime_type
+        )
+        
+        # Set content disposition to inline for in-browser viewing
+        response.headers.set(
+            'Content-Disposition', 
+            f'inline; filename="{os.path.basename(filename)}"'
+        )
+        
+        return response
+        
+    except Exception as e:
+        current_app.logger.error(f"Error fetching document: {str(e)}")
+        flash(f'Error viewing document: {str(e)}', 'error')
+        return redirect(url_for('main_routes.search_documents'))

@@ -1,8 +1,9 @@
 # tasks/dropbox_tasks.py
 
 from celery import shared_task
+import time
 from .celery_app import celery_app, logger
-from app.constants import DOCUMENT_STATUSES
+from app.constants import DOCUMENT_STATUSES, DROPBOX_SYNC_SETTINGS
 from app.services.dropbox_service import DropboxService
 from app.models.models import Document, DropboxSync
 from app.extensions import db
@@ -16,7 +17,7 @@ from .document_tasks import process_document
 
 @celery_app.task(name='tasks.sync_dropbox', bind=True)
 def sync_dropbox(self):
-    """Sync files from Dropbox folder"""
+    """Sync files from Dropbox folder with rate limiting"""
     logger.info("=== Starting Dropbox sync task ===")
     
     # Create Flask app instance
@@ -29,8 +30,23 @@ def sync_dropbox(self):
             dropbox_token = os.getenv('DROPBOX_ACCESS_TOKEN', 'NOT_SET')
             dropbox_folder = os.getenv('DROPBOX_FOLDER_PATH', '')
             
+            # Rate limiting configuration from constants (with environment variable override)
+            delay_seconds = int(os.getenv(
+                "DOCUMENT_PROCESSING_DELAY", 
+                str(DROPBOX_SYNC_SETTINGS['DOCUMENT_PROCESSING_DELAY'])
+            ))
+            batch_size = int(os.getenv(
+                "DROPBOX_BATCH_SIZE", 
+                str(DROPBOX_SYNC_SETTINGS['DROPBOX_BATCH_SIZE'])
+            ))
+            max_concurrent = int(os.getenv(
+                "MAX_CONCURRENT_PROCESSING", 
+                str(DROPBOX_SYNC_SETTINGS['MAX_CONCURRENT_PROCESSING'])
+            ))
+            
             logger.info(f"DROPBOX_ACCESS_TOKEN exists: {'Yes' if dropbox_token != 'NOT_SET' else 'No'}")
             logger.info(f"DROPBOX_FOLDER_PATH value: '{dropbox_folder}'")
+            logger.info(f"Rate limiting: {delay_seconds}s delay, batch size: {batch_size}, max concurrent: {max_concurrent}")
             
             # Initialize DropboxService
             try:
@@ -117,7 +133,7 @@ def sync_dropbox(self):
                 logger.error(traceback.format_exc())
                 return {"status": "error", "message": f"Error listing Dropbox files: {str(e)}"}
             
-            # Process files
+            # Process files with rate limiting
             processed_count = 0
             error_count = 0
             
@@ -125,14 +141,15 @@ def sync_dropbox(self):
             from app.services.storage_service import MinIOStorage
             storage = MinIOStorage()
             
-            for file_metadata in new_files:
+            # Process files in batches with delays
+            for i, file_metadata in enumerate(new_files):
                 temp_file = None
                 try:
                     # Get filename from path
                     file_name = os.path.basename(getattr(file_metadata, 'path_display', 
                                                          getattr(file_metadata, 'path_lower')))
                     
-                    logger.info(f"Processing file: {file_name}")
+                    logger.info(f"Processing file: {file_name} ({i+1}/{len(new_files)})")
                     
                     # Create temp file
                     temp_file = tempfile.NamedTemporaryFile(delete=False).name
@@ -186,6 +203,19 @@ def sync_dropbox(self):
                     logger.info(f"Queued {file_name} for processing (Document ID: {document.id})")
                     
                     processed_count += 1
+                    
+                    # Apply rate limiting
+                    if i < len(new_files) - 1:
+                        # Apply full delay between batches, or a small delay within batches
+                        if (processed_count % batch_size) == 0:
+                            logger.info(f"Processed batch of {batch_size}. Waiting {delay_seconds}s before next batch...")
+                            time.sleep(delay_seconds)
+                        else:
+                            # Small delay between documents in the same batch
+                            small_delay = 5
+                            logger.info(f"Adding small delay of {small_delay}s between files in batch")
+                            time.sleep(small_delay)
+                    
                 except Exception as e:
                     logger.error(f"Error processing file {getattr(file_metadata, 'name', 'unknown')}: {str(e)}")
                     logger.error(traceback.format_exc())

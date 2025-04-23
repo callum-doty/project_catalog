@@ -71,6 +71,14 @@
         <h3 class="text-lg font-semibold text-gray-900">{{ doc.filename }}</h3>
         <p class="text-sm text-gray-500">Uploaded: {{ doc.upload_date }}</p>
       </div>
+    <div class="mt-4">
+      <a href="{{ url_for('main_routes.view_document', filename=doc.filename) }}" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          class="w-full block text-center px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none">
+        View Document
+      </a>
+    </div>
 
       <!-- Tone Badge - if available -->
       {% if doc.document_tone %} {% set tone_colors = { 'positive':
@@ -218,6 +226,17 @@
       </div>
     </div>
     {% endif %}
+    
+    <div class="mt-4">
+      
+        href="{{ url_for('main_routes.view_document', filename=doc.filename) }}"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="w-full block text-center px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none"
+      >
+        View Document
+      </a>
+    </div>
   </div>
 </div>
 {% endmacro %}
