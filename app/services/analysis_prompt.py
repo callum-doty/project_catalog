@@ -1,4 +1,4 @@
-# app/services/enhanced_analysis_prompt.py
+# app/services/analysis_prompt.py
 
 def get_analysis_prompt(filename: str) -> str:
     """

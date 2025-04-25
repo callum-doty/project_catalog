@@ -1,30 +1,56 @@
-// static/js/sync.js
+// app/static/js/sync.js
 
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize sync status check
     checkSyncStatus();
     
-    // Set up periodic sync status checks
+    // Set up periodic sync status checks with a slightly longer interval
+    // to reduce server load
     setInterval(checkSyncStatus, 60000); // Check every minute
+    
+    // Initialize the sync button if it exists
+    const syncButton = document.getElementById('triggerSyncBtn');
+    if (syncButton) {
+        syncButton.addEventListener('click', manualSync);
+    }
 });
 
-// Function to check sync status
+// Function to check sync status with proper error handling and timeout
 async function checkSyncStatus() {
+    // Create an abort controller for timeout management
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    
     try {
-        const response = await fetch('/api/sync-status');
+        const response = await fetch('/api/sync-status', {
+            signal: controller.signal,
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        });
+        
+        // Clear the timeout since the request completed
+        clearTimeout(timeoutId);
         
         if (!response.ok) {
             updateSyncStatus('error', 'Error checking sync status');
+            console.error(`Status check failed: ${response.status} ${response.statusText}`);
             return;
         }
         
         const data = await response.json();
-        console.log('Sync status:', data);
         
-        // Update sync indicator
+        // Find status elements
         const statusIndicator = document.querySelector('.sync-indicator');
         const statusText = document.querySelector('.sync-text');
         
+        // Only proceed if elements exist
+        if (!statusIndicator || !statusText) {
+            console.warn('Sync status elements not found - skipping update');
+            return;
+        }
+        
+        // Update sync indicator
         if (data.dropbox_connected) {
             // Connected to Dropbox
             if (data.last_sync_time) {
@@ -56,18 +82,26 @@ async function checkSyncStatus() {
             updateSyncStatus('error', 'Dropbox not connected');
         }
     } catch (error) {
-        console.error('Error checking sync status:', error);
-        updateSyncStatus('error', 'Error checking sync status');
+        // Clear the timeout to avoid memory leaks
+        clearTimeout(timeoutId);
+        
+        if (error.name === 'AbortError') {
+            console.error('Sync status check timed out');
+            updateSyncStatus('error', 'Connection timeout');
+        } else {
+            console.error('Error checking sync status:', error);
+            updateSyncStatus('error', 'Connection error');
+        }
     }
 }
 
-// Function to update sync status UI
+// Function to update sync status UI with defensive checks
 function updateSyncStatus(status, message) {
     const statusIndicator = document.querySelector('.sync-indicator');
     const statusText = document.querySelector('.sync-text');
     
     if (!statusIndicator || !statusText) {
-        console.error('Sync status elements not found');
+        console.warn('Sync status elements not found');
         return;
     }
     
@@ -93,72 +127,133 @@ function updateSyncStatus(status, message) {
     statusText.textContent = message;
 }
 
-// Format time ago
+// Format time ago with defensive checks
 function formatTimeAgo(date) {
-    const now = new Date();
-    const diffMs = now - date;
-    const diffSeconds = Math.floor(diffMs / 1000);
-    const diffMinutes = Math.floor(diffSeconds / 60);
-    const diffHours = Math.floor(diffMinutes / 60);
-    const diffDays = Math.floor(diffHours / 24);
+    if (!date || !(date instanceof Date) || isNaN(date)) {
+        return 'Unknown time';
+    }
     
-    if (diffDays > 0) {
-        return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
-    } else if (diffHours > 0) {
-        return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
-    } else if (diffMinutes > 0) {
-        return `${diffMinutes} minute${diffMinutes !== 1 ? 's' : ''} ago`;
-    } else {
-        return 'Just now';
+    try {
+        const now = new Date();
+        const diffMs = now - date;
+        const diffSeconds = Math.floor(diffMs / 1000);
+        const diffMinutes = Math.floor(diffSeconds / 60);
+        const diffHours = Math.floor(diffMinutes / 60);
+        const diffDays = Math.floor(diffHours / 24);
+        
+        if (diffDays > 0) {
+            return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+        } else if (diffHours > 0) {
+            return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+        } else if (diffMinutes > 0) {
+            return `${diffMinutes} minute${diffMinutes !== 1 ? 's' : ''} ago`;
+        } else {
+            return 'Just now';
+        }
+    } catch (error) {
+        console.error('Error formatting time:', error);
+        return 'Unknown time';
     }
 }
 
-// Function to manually trigger sync
+// Function to manually trigger sync - properly debounced and with timeout
 async function manualSync(event) {
-    event.preventDefault();
+    if (event) {
+        event.preventDefault();
+    }
+    
+    // Get the button carefully
+    const button = event.currentTarget || event.target;
+    if (!button) {
+        console.error("Button element not found in event");
+        return;
+    }
+    
     console.log("Manual sync triggered");
-
-    const button = event.target;
+    
+    // Disable the button immediately to prevent double-clicks
     button.disabled = true;
     button.textContent = "Syncing...";
-
+    
+    // Get CSRF token with fallback
+    let csrfToken = '';
+    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    if (csrfMeta) {
+        csrfToken = csrfMeta.content;
+    } else {
+        console.warn("CSRF token not found - request may fail");
+    }
+    
+    // Create an abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout for sync
+    
     try {
         const response = await fetch("/api/trigger-sync", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "X-CSRFToken": document.querySelector('meta[name="csrf-token"]').content,
+                "X-CSRFToken": csrfToken,
+                "X-Requested-With": "XMLHttpRequest"
             },
+            signal: controller.signal
         });
-
+        
+        // Clear timeout since request completed
+        clearTimeout(timeoutId);
+        
         console.log("Response status:", response.status);
+        
+        if (!response.ok) {
+            throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+        }
+        
         const data = await response.json();
         console.log("Response data:", data);
-
-        if (response.ok) {
-            // Update status immediately
-            updateSyncStatus('success', 'Sync in progress...');
-            alert("Sync started successfully! Check logs for progress.");
-            
-            // Start polling for updated status
-            let pollCount = 0;
-            const maxPolls = 10;
-            const pollInterval = setInterval(() => {
-                pollCount++;
-                if (pollCount > maxPolls) {
-                    clearInterval(pollInterval);
-                }
-                checkSyncStatus();
-            }, 5000);
-        } else {
-            updateSyncStatus('error', `Error: ${data.message}`);
-            alert("Error: " + data.message);
+        
+        // Update status immediately
+        updateSyncStatus('success', 'Sync in progress...');
+        
+        if (data.message) {
+            alert(data.message || "Sync started successfully! Check logs for progress.");
         }
+        
+        // Start polling for updated status - limit to a reasonable number of attempts
+        let pollCount = 0;
+        const maxPolls = 10;
+        const pollInterval = setInterval(() => {
+            pollCount++;
+            if (pollCount > maxPolls) {
+                clearInterval(pollInterval);
+                button.disabled = false;
+                button.textContent = "Sync Now";
+                updateSyncStatus('warning', 'Sync status unknown');
+            }
+            checkSyncStatus();
+        }, 5000);
+
+        // Set a timeout to re-enable button after 60 seconds regardless of polling
+        setTimeout(() => {
+            if (button.disabled) {
+                button.disabled = false;
+                button.textContent = "Sync Now";
+            }
+        }, 60000);
+        
     } catch (error) {
-        console.error("Sync error:", error);
+        let errorMessage = "Unknown error";
+        
+        if (error.name === 'AbortError') {
+            errorMessage = "Sync request timed out";
+        } else {
+            errorMessage = error.message || "Error triggering sync";
+        }
+        
+        console.error("Sync error:", errorMessage);
         updateSyncStatus('error', 'Error triggering sync');
-        alert("Error triggering sync");
-    } finally {
+        alert(`Error: ${errorMessage}`);
+        
+        // Re-enable the button
         button.disabled = false;
         button.textContent = "Sync Now";
     }
@@ -166,3 +261,10 @@ async function manualSync(event) {
 
 // Expose the manualSync function globally
 window.manualSync = manualSync;
+
+// Global error handler for unhandled promise rejections
+window.addEventListener('unhandledrejection', function(event) {
+    console.error('Unhandled promise rejection:', event.reason);
+    // Prevent the default browser handling to avoid console errors
+    event.preventDefault();
+});
