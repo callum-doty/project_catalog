@@ -4,6 +4,8 @@ from logging.config import fileConfig
 from app import create_app
 from flask import current_app
 from alembic import context
+from app.models.scoring_models import DocumentScorecard
+from app.models.models import Document
 
 # Initialize the app and push the app context
 app = create_app()
