@@ -2,15 +2,15 @@ FROM python:3.9-slim
 
 # Set environment variables
 ENV PYTHONPATH=/app \
-    FLASK_APP=wsgi.py \ 
+    FLASK_APP=src/wsgi.py \ 
     FLASK_ENV=production \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 # Create the app directory first
-RUN mkdir -p /app
+RUN mkdir -p /app/src
 
-# Install system dependencies AS ROOT
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     poppler-utils \
     gcc \
@@ -36,8 +36,20 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements file
 COPY requirements.txt /app/
 
-# Install Python packages AS ROOT
+
+# Install Python packages
 RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Copy source code
+COPY src /app/src
+COPY migrations /app/migrations
+COPY gunicorn.conf.py start.sh /app/
+
+# Create necessary directories
+RUN mkdir -p /app/uploads /app/logs /app/data/documents /app/tmp
+
+# Set working directory
+WORKDIR /app
 
 # Create a non-root user
 RUN useradd -m appuser && chown -R appuser /app
@@ -45,15 +57,7 @@ RUN useradd -m appuser && chown -R appuser /app
 # Switch to non-root user
 USER appuser
 
-# Copy application code
-COPY --chown=appuser . /app/
-
-# Set working directory
-WORKDIR /app
-
-# Create necessary directories
-RUN mkdir -p uploads logs
-
 EXPOSE 5000
 
-CMD ["gunicorn", "--config", "gunicorn.conf.py", "wsgi:application"]
+# Use the start script
+CMD ["./start.sh"]

@@ -31,15 +31,15 @@ case $SERVICE_TYPE in
     echo "Starting web service..."
     
     # Try to run database migrations
-    python -m flask db upgrade || echo "WARNING: Database migrations failed"
+    FLASK_APP=src/wsgi.py python -m flask db upgrade || echo "WARNING: Database migrations failed"
     
     # Start the Flask application with proper settings for proxies
     if [ -n "$RAILWAY_ENVIRONMENT" ]; then
         echo "Starting with Railway proxy settings..."
-        gunicorn --bind "0.0.0.0:${PORT:-5000}" --workers=1 --timeout=120 --forwarded-allow-ips='*' wsgi:application
+        gunicorn --bind "0.0.0.0:${PORT:-5000}" --workers=1 --timeout=120 --forwarded-allow-ips='*' src.wsgi:application
     else
         echo "Starting with standard settings..."
-        gunicorn --bind "0.0.0.0:${PORT:-5000}" --workers=1 --timeout=120 wsgi:application
+        gunicorn --bind "0.0.0.0:${PORT:-5000}" --workers=1 --timeout=120 src.wsgi:application
     fi
     ;;
     
@@ -48,17 +48,17 @@ case $SERVICE_TYPE in
     
     # List available tasks (for debugging)
     echo "Listing available tasks..."
-    python -c "from celery import Celery; app = Celery('tasks'); app.autodiscover_tasks(['tasks'], force=True); print('Available tasks:', list(app.tasks.keys()))"
+    python -c "import sys; print('Python path:', sys.path); from src.catalog.tasks.celery_app import celery_app; print('Available tasks:', list(celery_app.tasks.keys()))"
     
     # Start with very limited concurrency to prevent memory issues
-    celery -A tasks worker -Q document_processing,analysis,celery --loglevel=info --concurrency=2
+    celery -A src.catalog.tasks.celery_app worker -Q document_processing,analysis,celery --loglevel=info --concurrency=2
     ;;
     
   "beat")
     echo "Starting Celery beat..."
     
     # Start the beat scheduler with a smaller interval
-    celery -A tasks beat --loglevel=info --max-interval=60
+    celery -A src.catalog.tasks.celery_app beat --loglevel=info --max-interval=60
     ;;
     
   *)

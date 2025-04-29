@@ -1,5 +1,8 @@
-# scripts/initialize_taxonomy.py
 
+
+from src.catalog.extensions import db
+from src.catalog.models import KeywordTaxonomy, KeywordSynonym
+from src.catalog import create_app
 import os
 import sys
 import logging
@@ -8,9 +11,6 @@ import datetime
 # Add the parent directory to the path so we can import app modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import create_app
-from app.models.keyword_models import KeywordTaxonomy, KeywordSynonym
-from app.extensions import db
 
 # Initialize base taxonomy data
 BASE_TAXONOMY = {
@@ -64,6 +64,7 @@ SYNONYM_MAPPINGS = {
     "Republican": ["GOP", "RNC", "red"],
 }
 
+
 def initialize_taxonomy():
     """Initialize the taxonomy directly from the dictionary data"""
     app = create_app()
@@ -72,9 +73,10 @@ def initialize_taxonomy():
             # Check if we already have taxonomy terms
             existing_count = KeywordTaxonomy.query.count()
             if existing_count > 0:
-                print(f"Found {existing_count} existing taxonomy terms. Skipping initialization.")
+                print(
+                    f"Found {existing_count} existing taxonomy terms. Skipping initialization.")
                 return
-            
+
             created_count = 0
             for primary_category, subcategories in BASE_TAXONOMY.items():
                 for subcategory, terms in subcategories.items():
@@ -90,7 +92,7 @@ def initialize_taxonomy():
                             )
                             db.session.add(taxonomy_term)
                             db.session.flush()  # Get the ID
-                            
+
                             # Add synonyms if available
                             synonyms = SYNONYM_MAPPINGS.get(term, [])
                             for synonym in synonyms:
@@ -99,22 +101,24 @@ def initialize_taxonomy():
                                     synonym=synonym
                                 )
                                 db.session.add(synonym_obj)
-                            
+
                             created_count += 1
-                            
+
                             # Commit in batches to avoid large transactions
                             if created_count % 20 == 0:
                                 db.session.commit()
-                                print(f"Created {created_count} taxonomy terms so far...")
-                                
+                                print(
+                                    f"Created {created_count} taxonomy terms so far...")
+
                         except Exception as e:
-                            print(f"Error creating taxonomy term '{term}': {str(e)}")
+                            print(
+                                f"Error creating taxonomy term '{term}': {str(e)}")
                             continue
-            
+
             # Final commit for any remaining terms
             db.session.commit()
             print(f"Successfully created {created_count} taxonomy terms.")
-        
+
         except Exception as e:
             db.session.rollback()
             print(f"Error initializing taxonomy: {str(e)}")

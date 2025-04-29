@@ -5,7 +5,7 @@ services:
     ports:
       - "0.0.0.0:5001:5000"
     environment:
-      - FLASK_APP=wsgi.py
+      - FLASK_APP=src/wsgi.py
       - DATABASE_URL=postgresql://custom_user:strong_password@db:5432/catalog_db
       - SQLALCHEMY_DATABASE_URI=postgresql://custom_user:strong_password@db:5432/catalog_db
       - FLASK_ENV=production
@@ -17,6 +17,7 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PYTHONPATH=/app/src
     volumes:
       - .:/app
     depends_on:
@@ -64,7 +65,7 @@ services:
 
   celery-worker:
     build: .
-    command: celery -A tasks worker -Q document_processing,analysis,previews,celery --loglevel=info
+    command: celery -A src.catalog.tasks.celery_app worker -Q document_processing,analysis,celery --loglevel=info
     volumes:
       - .:/app
     environment:
@@ -77,13 +78,14 @@ services:
       - DROPBOX_FOLDER_PATH=${DROPBOX_FOLDER_PATH}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PYTHONPATH=/app/src
     depends_on:
       - redis
       - db
 
   celery-beat:
     build: .
-    command: celery -A tasks beat --loglevel=info
+    command: celery -A src.catalog.tasks.celery_app beat --loglevel=info
     volumes:
       - .:/app
     environment:
@@ -95,6 +97,7 @@ services:
       - DROPBOX_ACCESS_TOKEN=${DROPBOX_ACCESS_TOKEN}
       - DROPBOX_FOLDER_PATH=${DROPBOX_FOLDER_PATH}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - PYTHONPATH=/app/src
     depends_on:
       - redis
       - db
