@@ -1,4 +1,3 @@
-
 from datetime import datetime
 from src.catalog import db
 
@@ -55,9 +54,9 @@ class DocumentScorecard(db.Model):
     updated_date = db.Column(db.DateTime(timezone=True),
                              default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationships
-    document = db.relationship(
-        'Document', backref=db.backref('scorecard', uselist=False))
+    # Relationship to document - REMOVE THE BACKREF HERE
+    # We'll just use the relationship defined in Document class
+    document = db.relationship('Document')  # No backref parameter
 
     def __repr__(self):
         return f"<DocumentScorecard document_id={self.document_id} score={self.total_score}>"

@@ -1,5 +1,4 @@
 
-
 # Main document models
 from src.catalog.models.document import (
     Document, BatchJob, LLMAnalysis, ExtractedText,
@@ -12,7 +11,7 @@ from src.catalog.models.keyword import (
     KeywordTaxonomy, KeywordSynonym, DocumentKeyword, SearchFeedback
 )
 
-# Score and quality models
+# Score and quality models - import after Document is loaded
 from src.catalog.models.scoring import DocumentScorecard
 
 # Export all model classes

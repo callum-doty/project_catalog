@@ -1,5 +1,6 @@
 from src.catalog import db
 from datetime import datetime
+from sqlalchemy.dialects.postgresql import TSVECTOR
 
 
 class BatchJob(db.Model):
@@ -24,8 +25,10 @@ class Document(db.Model):
     page_count = db.Column(db.Integer, nullable=False)
     status = db.Column(db.Text, nullable=False)
     batch_jobs_id = db.Column(db.Integer, db.ForeignKey('batch_jobs.id'))
+    search_vector = db.Column(TSVECTOR)
+
     scorecard = db.relationship(
-        'DocumentScorecard', backref='document', uselist=False, cascade="all, delete-orphan")
+        'DocumentScorecard', backref='document_parent', uselist=False, cascade="all, delete-orphan")
 
     # Relationships
     llm_analysis = db.relationship(

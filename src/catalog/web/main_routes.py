@@ -2,6 +2,7 @@
 
 from flask import Blueprint, render_template, request, session, flash, redirect, url_for, jsonify, current_app
 from werkzeug.utils import secure_filename
+
 import os
 import src.catalog
 from sqlalchemy.orm import joinedload
@@ -117,7 +118,7 @@ def get_celery_task(task_name):
     if task_name == 'process_document':
         return process_document
     elif task_name == 'sync_dropbox':
-        from tasks.dropbox_tasks import sync_dropbox
+        from src.catalog.tasks.dropbox_tasks import sync_dropbox
         return sync_dropbox
 
 
@@ -201,18 +202,27 @@ def upload_file():
         flash('No selected file', 'error')
         return redirect(url_for('main_routes.search_documents'))
 
+    document = None  # Initialize document to None
+    temp_path = None  # Initialize temp_path
+
     try:
         filename = secure_filename(file.filename)
         temp_path = os.path.join('/tmp', filename)
         file.save(temp_path)
 
+        # Ensure file was saved before proceeding
+        if not os.path.exists(temp_path):
+            raise IOError(f"Failed to save temporary file: {temp_path}")
+
+        file_size = os.path.getsize(temp_path)
+
         # Create document record FIRST
         document = Document(
             filename=filename,
             upload_date=datetime.utcnow(),
-            file_size=os.path.getsize(temp_path),
-            status='PENDING',
-            page_count=1
+            file_size=file_size,
+            status='PENDING',  # Start as PENDING
+            page_count=0
         )
         db.session.add(document)
         db.session.commit()
@@ -222,32 +232,67 @@ def upload_file():
         current_app.logger.info(
             f"Successfully uploaded {filename} to MinIO at {minio_path}")
 
-        # Queue document processing
+        # Queue ONLY the main document processing task
         try:
             current_app.logger.info(
-                f"Queuing document {document.id} for processing")
+                f"Queuing document {document.id} ({filename}) via process_document task")
 
-            from tasks.document_tasks import process_document
-            task = process_document.delay(filename, minio_path, document.id)
-            current_app.logger.info(f"Task queued with ID: {task.id}")
+            from src.catalog.tasks.celery_app import celery_app
+            # Pass all necessary arguments: filename, minio_path, document.id
+            task = celery_app.send_task('process_document', args=[
+                                        filename, minio_path, document.id])
 
-            from tasks.preview_tasks import generate_preview
-            preview_task = generate_preview.delay(filename, document.id)
             current_app.logger.info(
-                f"Preview task queued with ID: {preview_task.id}")
+                f"Main processing task queued with ID: {task.id} for document ID {document.id}")
 
         except Exception as e:
             current_app.logger.error(
-                f"Failed to queue tasks for document: {str(e)}")
+                f"Failed to queue process_document task for document {document.id if document else 'N/A'}: {str(e)}", exc_info=True)
 
-        os.remove(temp_path)
-        flash('File uploaded successfully', 'success')
+            if document:
+                document.status = 'FAILED'
+                db.session.commit()
+            flash('Error starting document processing.', 'error')
+
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+            return redirect(url_for('main_routes.search_documents'))
+
+        # Remove temp file *after* successful queuing
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
+        flash('File uploaded successfully. Processing initiated.', 'success')
         return redirect(url_for('main_routes.search_documents'))
 
     except Exception as e:
-        current_app.logger.error(f"Upload error: {str(e)}")
+        current_app.logger.error(
+            f"Upload error for file '{file.filename if file else 'N/A'}': {str(e)}", exc_info=True)
+        # Rollback DB changes if document creation started but failed
+        db.session.rollback()
+        # Update status to FAILED if document object exists
+        if document and document.id:
+            try:
+                # Re-fetch the document within a new session scope if needed, or just update status
+                doc_to_fail = Document.query.get(document.id)
+                if doc_to_fail:
+                    doc_to_fail.status = 'FAILED'
+                    db.session.commit()
+            except Exception as db_err:
+                current_app.logger.error(
+                    f"Failed to mark document as FAILED after upload error: {db_err}", exc_info=True)
+                db.session.rollback()
+
         flash(f'Error uploading file: {str(e)}', 'error')
-        return redirect(url_for('main_routes.search_documents'))
+        # Clean up temp file if it exists
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError as os_err:
+                current_app.logger.error(
+                    f"Error removing temp file during cleanup: {os_err}", exc_info=True)
+
+        return redirect(url_for('search_routes.search_documents'))
 
 
 @main_routes.route('/search')
@@ -355,10 +400,10 @@ def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None):
 def reprocess_document(document_id):
     """API endpoint to reprocess a specific document by ID"""
     try:
-        from tasks.recovery_tasks import reprocess_specific_document
+        from src.catalog.tasks.recovery_tasks import reprocess_document
 
         # Start the task
-        task = reprocess_specific_document.delay(document_id)
+        task = reprocess_document.delay(document_id)
 
         return jsonify({
             'status': 'success',
@@ -577,7 +622,7 @@ def recover_document(document_id):
             }), 400
 
         # Import recovery task
-        from tasks.recovery_tasks import reprocess_document
+        from src.catalog.tasks.recovery_tasks import reprocess_document
 
         # Reset document status
         document.status = 'PENDING'
@@ -632,7 +677,7 @@ def execute_sync():
         current_app.logger.info("Directly executing Dropbox sync")
 
         # Import the sync task function
-        from tasks.dropbox_tasks import sync_dropbox
+        from src.catalog.tasks.dropbox_tasks import sync_dropbox
 
         # Call the function directly (not as a task)
         result = sync_dropbox()

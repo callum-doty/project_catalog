@@ -13,7 +13,9 @@ from src.catalog.services.preview_service import PreviewService
 from src.catalog.services.search_service import SearchService
 from src.catalog.services.storage_service import MinIOStorage
 import logging
+import traceback
 from src.catalog.constants import DOCUMENT_STATUSES
+from src.catalog.tasks.analysis_utils import check_minimum_analysis
 
 
 search_service = SearchService()
@@ -68,7 +70,7 @@ def test_document_processing(self, document_id):
 
     try:
         # Import Flask app
-        from catalog import create_app
+        from src.catalog import create_app
         app = create_app()
 
         with app.app_context():
@@ -127,7 +129,7 @@ def invalidate_document_cache(document_id):
             f"Error invalidating cache for document {document_id}: {str(e)}")
 
 
-@celery_app.task(bind=True, base=DocumentProcessorTask, name='catalog.tasks.process_document')
+@celery_app.task(bind=True, base=DocumentProcessorTask, name='process_document')
 def process_document(self, filename, minio_path, document_id):
     """Process document through the pipeline using truly modular analysis"""
     logger.info(f"=== STARTING DOCUMENT PROCESSING ===")
@@ -137,7 +139,7 @@ def process_document(self, filename, minio_path, document_id):
     logger.info(f"Document ID: {document_id}")
 
     # avoid circular import
-    from catalog import create_app
+    from src.catalog import create_app
     app = create_app()
 
     with app.app_context():
@@ -154,7 +156,7 @@ def process_document(self, filename, minio_path, document_id):
             logger.info(f"Starting analysis for document: {filename}")
 
             # Initialize LLM service
-            from catalog.services.llm_service import LLMService
+            from src.catalog.services.llm_service import LLMService
             llm_service = LLMService()
 
             # Process in batches with different priorities
@@ -251,28 +253,54 @@ def process_document(self, filename, minio_path, document_id):
             raise
 
 
-def check_minimum_analysis(document_id: int) -> bool:
-    """Check if document has minimum required analysis components"""
+def store_partial_analysis(document_id: int, response: dict):
+    """Simplified version for testing"""
+    from src.catalog.services.llm_parser import LLMResponseParser
+
+    if not response:
+        logger.warning(f"Empty response for document {document_id}")
+        return False
+
     try:
-        # Document must have at least one of these to be considered analyzed
-        has_llm_analysis = LLMAnalysis.query.filter_by(
-            document_id=document_id).first() is not None
-        has_extracted_text = ExtractedText.query.filter_by(
-            document_id=document_id).first() is not None
+        parser = LLMResponseParser()
 
-        logger.info(
-            f"Minimum analysis check: LLM Analysis: {has_llm_analysis}, Extracted Text: {has_extracted_text}")
+        # Focus only on document_analysis first (most critical component)
+        if "document_analysis" in response:
+            try:
+                llm_analysis_data = parser.parse_llm_analysis(
+                    {"document_analysis": response["document_analysis"]})
 
-        # Consider document analyzable if it has basic metadata and text
-        return has_llm_analysis or has_extracted_text
+                # Print the data to be stored
+                logger.info(f"Analysis data to save: {llm_analysis_data}")
+
+                # Create new record directly
+                llm_analysis = LLMAnalysis(
+                    document_id=document_id,
+                    **llm_analysis_data
+                )
+                db.session.add(llm_analysis)
+                db.session.commit()
+
+                logger.info(
+                    f"Successfully stored document analysis with ID: {llm_analysis.id}")
+                return True
+
+            except Exception as e:
+                logger.error(f"Error storing document analysis: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                db.session.rollback()
+                return False
+
     except Exception as e:
-        logger.error(f"Error checking minimum analysis: {str(e)}")
+        logger.error(f"Error in store_partial_analysis: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        db.session.rollback()
         return False
 
 
 def store_partial_analysis(document_id: int, response: dict):
     """Store partial analysis results in database"""
-    from catalog.services.llm_parser import LLMResponseParser
+    from src.catalog.services.llm_parser import LLMResponseParser
 
     if not response:
         logger.warning(f"Empty response for document {document_id}")
@@ -286,6 +314,9 @@ def store_partial_analysis(document_id: int, response: dict):
             try:
                 llm_analysis_data = parser.parse_llm_analysis(
                     {"document_analysis": response["document_analysis"]})
+
+                # Print the data to be stored
+                logger.info(f"Analysis data to save: {llm_analysis_data}")
 
                 # Check if record exists
                 llm_analysis = LLMAnalysis.query.filter_by(
@@ -303,10 +334,22 @@ def store_partial_analysis(document_id: int, response: dict):
                     )
                     db.session.add(llm_analysis)
 
-                db.session.flush()
-                logger.info(f"Stored document analysis metadata")
+                # Commit immediately for this critical component
+                db.session.commit()
+                logger.info(f"Successfully stored document analysis")
+
+                # Verify the record was saved
+                if LLMAnalysis.query.filter_by(document_id=document_id).first() is not None:
+                    logger.info("Verified LLM Analysis was saved correctly")
+                else:
+                    logger.warning("LLM Analysis failed to save to database!")
+
             except Exception as e:
                 logger.error(f"Error storing document analysis: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                db.session.rollback()
+
+        # Continue with remaining components, but commit after each one
 
         # Store classification if present
         if "classification" in response:
@@ -330,9 +373,13 @@ def store_partial_analysis(document_id: int, response: dict):
                     )
                     db.session.add(classification)
 
-                logger.info(f"Stored classification data")
+                # Commit immediately after this component
+                db.session.commit()
+                logger.info(f"Successfully stored classification data")
             except Exception as e:
                 logger.error(f"Error storing classification: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                db.session.rollback()
 
         # Store extracted text if present
         if "extracted_text" in response:
@@ -356,9 +403,23 @@ def store_partial_analysis(document_id: int, response: dict):
                     )
                     db.session.add(extracted_text)
 
-                logger.info(f"Stored extracted text data")
+                # Commit immediately after this component
+                db.session.commit()
+                logger.info(f"Successfully stored extracted text data")
+
+                # Verify the record was saved
+                if ExtractedText.query.filter_by(document_id=document_id).first() is not None:
+                    logger.info("Verified Extracted Text was saved correctly")
+                else:
+                    logger.warning(
+                        "Extracted Text failed to save to database!")
+
             except Exception as e:
                 logger.error(f"Error storing extracted text: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                db.session.rollback()
+
+        # Process remaining components with individual commits
 
         # Store design elements if present
         if "design_elements" in response:
@@ -382,9 +443,12 @@ def store_partial_analysis(document_id: int, response: dict):
                     )
                     db.session.add(design)
 
-                logger.info(f"Stored design element data")
+                db.session.commit()
+                logger.info(f"Successfully stored design element data")
             except Exception as e:
                 logger.error(f"Error storing design elements: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                db.session.rollback()
 
         # Store entity information if present
         if "entities" in response:
@@ -408,9 +472,12 @@ def store_partial_analysis(document_id: int, response: dict):
                     )
                     db.session.add(entity)
 
-                logger.info(f"Stored entity information")
+                db.session.commit()
+                logger.info(f"Successfully stored entity information")
             except Exception as e:
                 logger.error(f"Error storing entity information: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                db.session.rollback()
 
         # Store communication focus if present
         if "communication_focus" in response:
@@ -434,9 +501,12 @@ def store_partial_analysis(document_id: int, response: dict):
                     )
                     db.session.add(focus)
 
-                logger.info(f"Stored communication focus data")
+                db.session.commit()
+                logger.info(f"Successfully stored communication focus data")
             except Exception as e:
                 logger.error(f"Error storing communication focus: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                db.session.rollback()
 
         # Store hierarchical keywords if present
         if "hierarchical_keywords" in response:
@@ -445,27 +515,33 @@ def store_partial_analysis(document_id: int, response: dict):
                     response, document_id)
                 for keyword in hierarchical_keywords:
                     db.session.add(keyword)
+
+                db.session.commit()
                 logger.info(
-                    f"Stored {len(hierarchical_keywords)} hierarchical keywords")
+                    f"Successfully stored {len(hierarchical_keywords)} hierarchical keywords")
             except Exception as e:
                 logger.error(
                     f"Error processing hierarchical keywords: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                db.session.rollback()
 
-        # Commit all changes
-        db.session.commit()
-        logger.info(f"Successfully stored all partial analysis results")
+        # Final check after processing all components
+        has_minimum = check_minimum_analysis(document_id)
+        logger.info(
+            f"Final check - Has minimum required analysis: {has_minimum}")
 
         return True
 
     except Exception as e:
         logger.error(f"Error storing partial analysis results: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         db.session.rollback()
         return False
 
 
 def store_analysis_results(document_id: int, response: dict):
     """Store analysis results in database"""
-    from catalog.services.llm_parser import LLMResponseParser
+    from src.catalog.services.llm_parser import LLMResponseParser
 
     try:
         parser = LLMResponseParser()
@@ -518,7 +594,6 @@ def store_analysis_results(document_id: int, response: dict):
         db.session.add(classification)
         logger.info(f"Stored classification for document {document_id}")
 
-        # NEW: Store Entity Information
         try:
             entity_data = parser.parse_entity_info(response)
             entity = Entity(
@@ -531,7 +606,6 @@ def store_analysis_results(document_id: int, response: dict):
         except Exception as e:
             logger.error(f"Failed to store entity information: {str(e)}")
 
-        # NEW: Store Communication Focus
         try:
             focus_data = parser.parse_communication_focus(response)
             focus = CommunicationFocus(
@@ -579,7 +653,7 @@ def store_analysis_results(document_id: int, response: dict):
 @celery_app.task(name='tasks.recover_pending_documents')
 def recover_pending_documents():
     """Identify and recover documents stuck in PENDING state"""
-    from catalog import create_app
+    from src.catalog import create_app
     app = create_app()
 
     with app.app_context():

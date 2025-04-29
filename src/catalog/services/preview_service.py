@@ -43,7 +43,7 @@ class PreviewService:
             cache.set(in_progress_key, True, timeout=60)
 
             # Queue background task for preview generation
-            from tasks.preview_tasks import generate_preview
+            from src.catalog.tasks.preview_tasks import generate_preview
             generate_preview.delay(filename)
 
             # Generate preview synchronously for immediate display just this once

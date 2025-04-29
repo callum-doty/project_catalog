@@ -7,6 +7,10 @@ from celery import Celery
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+celery_app = Celery('src.catalog.tasks')
+celery_app.config_from_object('django.conf:settings', namespace='CELERY')
+celery_app.autodiscover_tasks(['src.catalog.tasks'])
+
 # Get queue names from constants
 try:
     from src.catalog.constants import QUEUE_NAMES, DOCUMENT_STATUSES
@@ -51,6 +55,7 @@ celery_app.conf.update(
 
 # Configure task routing
 celery_app.conf.task_routes = {
+    'catalog.tasks.process_document': {'queue': QUEUE_NAMES['DOCUMENT_PROCESSING']},
     'src.catalog.tasks.document_tasks.process_document': {'queue': QUEUE_NAMES['DOCUMENT_PROCESSING']},
     'src.catalog.tasks.analyze_document': {'queue': QUEUE_NAMES['ANALYSIS']},
     'src.catalog.tasks.preview_tasks.generate_preview': {'queue': QUEUE_NAMES['PREVIEWS']},
@@ -64,3 +69,9 @@ try:
         logger.info("Successfully connected to Redis")
 except Exception as e:
     logger.error(f"Failed to connect to Redis: {str(e)}")
+
+
+@celery_app.task(name='debug.list_tasks')
+def list_registered_tasks():
+    """List all registered tasks"""
+    return list(sorted(celery_app.tasks.keys()))

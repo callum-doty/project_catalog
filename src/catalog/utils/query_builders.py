@@ -286,6 +286,7 @@ def get_stuck_documents_query(hours=1):
         SQLAlchemy query for stuck documents
     """
     from datetime import datetime, timedelta
+
     time_threshold = datetime.utcnow() - timedelta(hours=hours)
 
     return Document.query.filter(

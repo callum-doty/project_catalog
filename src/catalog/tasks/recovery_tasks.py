@@ -13,7 +13,7 @@ def reprocess_document(self, filename: str, minio_path: str, document_id: int):
         f"Starting reprocessing for document: {filename} (ID: {document_id})")
 
     # Import Flask app
-    from catalog import create_app
+    from src.catalog import create_app
     app = create_app()
 
     with app.app_context():
@@ -28,7 +28,7 @@ def reprocess_document(self, filename: str, minio_path: str, document_id: int):
         db.session.commit()
 
         # Call the regular processing task
-        from tasks.document_tasks import process_document
+        from src.catalog.tasks.document_tasks import process_document
         process_document.delay(filename, minio_path, document_id)
 
         logger.info(f"Queued document {document_id} for reprocessing")

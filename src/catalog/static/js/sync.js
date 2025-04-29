@@ -5,7 +5,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Set up periodic sync status checks with a slightly longer interval
     // to reduce server load
-    setInterval(checkSyncStatus, 60000); // Check every minute
+    setInterval(checkSyncStatus, 7200000); 
     
     // Initialize the sync button if it exists
     const syncButton = document.getElementById('triggerSyncBtn');
