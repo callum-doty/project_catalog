@@ -431,6 +431,8 @@ class LLMResponseParser:
             if isinstance(hierarchical_keywords, str):
                 try:
                     hierarchical_keywords = json.loads(hierarchical_keywords)
+                    logger.info(
+                        f"Successfully parsed hierarchical_keywords from JSON string")
                 except:
                     logger.warning(
                         f"Failed to parse hierarchical_keywords as JSON: {hierarchical_keywords[:100]}...")
@@ -438,9 +440,10 @@ class LLMResponseParser:
 
             logger.info(
                 f"Processing {len(hierarchical_keywords)} hierarchical keywords")
+
             document_keywords = []
 
-            for kw in hierarchical_keywords[:10]:  # Limit to 10 keywords max
+            for kw in hierarchical_keywords[:10]:
                 try:
                     # Skip if not a dictionary
                     if not isinstance(kw, dict):

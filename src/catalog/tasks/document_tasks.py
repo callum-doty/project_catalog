@@ -211,7 +211,25 @@ def process_document(self, filename, minio_path, document_id):
                 logger.error(f"Error in core component analysis: {str(e)}")
                 logger.error(traceback.format_exc())
 
-            # [Continue with other batches...]
+            # Batch 2: Add keywords component (along with other components in this batch)
+            logger.info(
+                f"Processing batch 2 (classification, entities, design, keywords)")
+            try:
+                batch2_response = llm_service.analyze_document_modular(
+                    filename, components=["classification",
+                                          "entities", "design", "keywords"]
+                )
+                if batch2_response:
+                    success = store_partial_analysis(
+                        document_id, batch2_response)
+                    if success:
+                        logger.info("✅ Batch 2 components stored successfully")
+                        success_count += 1
+                    else:
+                        logger.error("❌ Failed to store batch 2 components")
+            except Exception as e:
+                logger.error(f"Error in batch 2 component analysis: {str(e)}")
+                logger.error(traceback.format_exc())
 
             # Final check for minimum required components
             has_minimum_analysis = check_minimum_analysis(document_id)
@@ -471,27 +489,42 @@ def store_partial_analysis(document_id: int, response: dict):
         # Store hierarchical keywords if present
         if "hierarchical_keywords" in response:
             try:
+                # Log the hierarchical_keywords data to verify it's present
+                logger.info(
+                    f"Processing hierarchical_keywords for document {document_id}")
+                # Just log a few for brevity
+                logger.info(
+                    f"Hierarchical keywords data: {response.get('hierarchical_keywords')[:2]}")
+
                 # Use static method directly
                 hierarchical_keywords = LLMResponseParser.parse_hierarchical_keywords(
                     response, document_id)
-                for keyword in hierarchical_keywords:
-                    db.session.add(keyword)
 
-                db.session.commit()
-                logger.info(
-                    f"Successfully stored {len(hierarchical_keywords)} hierarchical keywords")
+                if hierarchical_keywords:
+                    logger.info(
+                        f"Found {len(hierarchical_keywords)} parsed keywords")
+                    for keyword in hierarchical_keywords:
+                        db.session.add(keyword)
+
+                    # Commit the keywords separately to ensure they're saved
+                    db.session.commit()
+                    logger.info(
+                        f"Successfully stored {len(hierarchical_keywords)} hierarchical keywords")
+
+                    # Verify storage
+                    from src.catalog.models import DocumentKeyword
+                    count = DocumentKeyword.query.filter_by(
+                        document_id=document_id).count()
+                    logger.info(
+                        f"Verification: {count} document keywords found in database for document {document_id}")
+                else:
+                    logger.warning(
+                        f"No hierarchical keywords were parsed for document {document_id}")
             except Exception as e:
                 logger.error(
                     f"Error processing hierarchical keywords: {str(e)}")
                 logger.error(f"Traceback: {traceback.format_exc()}")
                 db.session.rollback()
-
-        # Final check after processing all components
-        has_minimum = check_minimum_analysis(document_id)
-        logger.info(
-            f"Final check - Has minimum required analysis: {has_minimum}")
-
-        return True
 
     except Exception as e:
         logger.error(f"Error storing partial analysis results: {str(e)}")
