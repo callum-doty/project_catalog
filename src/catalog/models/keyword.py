@@ -100,8 +100,8 @@ class KeywordSynonym(db.Model):
 
 class DocumentKeyword(db.Model):
     """
-    Enhanced keyword association for documents with hierarchical information.
-    Replaces or extends the current LLMKeyword model.
+    Enhanced keyword association for documents with hierarchical information
+    and display order.
     """
     __tablename__ = 'document_keywords'
     id = db.Column(db.Integer, primary_key=True)
@@ -110,13 +110,14 @@ class DocumentKeyword(db.Model):
     relevance_score = db.Column(db.Float)
     extraction_date = db.Column(db.DateTime(
         timezone=True), default=datetime.utcnow)
+    display_order = db.Column(db.Integer, default=0)  # New field for ordering
 
     # Relationships
     document = db.relationship('Document', backref='document_keywords')
     taxonomy_term = db.relationship('KeywordTaxonomy')
 
     def __repr__(self):
-        return f"<DocumentKeyword doc_id={self.document_id} term={self.taxonomy_term.term if self.taxonomy_term else 'None'}>"
+        return f"<DocumentKeyword doc_id={self.document_id} term={self.taxonomy_term.term if self.taxonomy_term else 'None'} order={self.display_order}>"
 
 
 class SearchFeedback(db.Model):

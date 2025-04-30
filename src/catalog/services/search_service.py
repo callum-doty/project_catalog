@@ -489,43 +489,6 @@ class SearchService:
             self.logger.error(f"Error in query expansion: {str(e)}")
             return query  # Fall back to original query on error
 
-    def get_document_hierarchical_keywords_bulk(self, document_ids: List[int]) -> Dict[int, List[Dict]]:
-        """
-        Efficiently get hierarchical keywords for multiple documents at once
-
-        Args:
-            document_ids: List of document IDs
-
-        Returns:
-            Dictionary mapping document IDs to their keywords
-        """
-        try:
-            # Single query to get all keywords for all documents
-            keywords_data = db.session.query(
-                DocumentKeyword, KeywordTaxonomy
-            ).join(
-                KeywordTaxonomy, DocumentKeyword.taxonomy_id == KeywordTaxonomy.id
-            ).filter(
-                DocumentKeyword.document_id.in_(document_ids)
-            ).all()
-
-            # Organize by document ID
-            results = {doc_id: [] for doc_id in document_ids}
-
-            for doc_kw, taxonomy in keywords_data:
-                results[doc_kw.document_id].append({
-                    'id': taxonomy.id,
-                    'term': taxonomy.term,
-                    'primary_category': taxonomy.primary_category,
-                    'subcategory': taxonomy.subcategory,
-                    'relevance_score': doc_kw.relevance_score
-                })
-
-            return results
-        except Exception as e:
-            self.logger.error(f"Error getting hierarchical keywords: {str(e)}")
-            return {doc_id: [] for doc_id in document_ids}
-
     @cache.memoize(timeout=CACHE_TIMEOUTS['TAXONOMY'])
     def generate_taxonomy_facets(self, selected_primary=None, selected_subcategory=None, selected_term=None):
         """
@@ -770,12 +733,12 @@ class SearchService:
                     'election_year': doc.llm_analysis.election_year if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
                     'document_tone': doc.llm_analysis.document_tone if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
 
-                    # Keywords
+                    # Legacy keywords from LLM Analysis
                     'keywords': [
                         {
                             'text': kw.keyword,
                             'category': kw.category
-                        } for kw in (doc.llm_analysis.keywords if hasattr(doc, 'llm_analysis') and doc.llm_analysis else [])
+                        } for kw in (doc.llm_analysis.keywords if hasattr(doc, 'llm_analysis') and doc.llm_analysis and hasattr(doc.llm_analysis, 'keywords') else [])
                         if hasattr(kw, 'keyword')
                     ],
 
@@ -793,9 +756,13 @@ class SearchService:
                     # Extract text
                     'main_message': doc.extracted_text.main_message if hasattr(doc, 'extracted_text') and doc.extracted_text else '',
 
-                    # Hierarchical keywords
+                    # Hierarchical keywords - get from all_keywords dictionary
                     'hierarchical_keywords': all_keywords.get(doc.id, [])
                 }
+
+                # Log the hierarchical keywords for debugging
+                self.logger.debug(
+                    f"Document {doc.id} hierarchical keywords: {document_data['hierarchical_keywords']}")
 
                 formatted_docs.append(document_data)
             except Exception as e:
@@ -805,6 +772,26 @@ class SearchService:
                 continue
 
         return formatted_docs
+
+    # Also update the get_document_hierarchical_keywords_bulk method to ensure it uses the new manager
+    def get_document_hierarchical_keywords_bulk(self, document_ids: List[int]) -> Dict[int, List[Dict]]:
+        """
+        Efficiently get hierarchical keywords for multiple documents at once
+
+        Args:
+            document_ids: List of document IDs
+
+        Returns:
+            Dictionary mapping document IDs to their keywords
+        """
+        try:
+            # Use the DocumentKeywordManager for consistent keyword retrieval
+            from src.catalog.services.keyword_manager import DocumentKeywordManager
+            return DocumentKeywordManager.get_bulk_document_keywords(document_ids)
+        except Exception as e:
+            self.logger.error(
+                f"Error getting hierarchical keywords: {str(e)}")
+            return {doc_id: [] for doc_id in document_ids}
 
     def _queue_missing_previews(self, filenames):
         """

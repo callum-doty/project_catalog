@@ -489,37 +489,38 @@ def store_partial_analysis(document_id: int, response: dict):
         # Store hierarchical keywords if present
         if "hierarchical_keywords" in response:
             try:
-                # Log the hierarchical_keywords data to verify it's present
+                # Import the DocumentKeywordManager
+                from src.catalog.services.keyword_manager import DocumentKeywordManager
+
+                # Get the hierarchical keywords data from the response
                 logger.info(
                     f"Processing hierarchical_keywords for document {document_id}")
-                # Just log a few for brevity
-                logger.info(
-                    f"Hierarchical keywords data: {response.get('hierarchical_keywords')[:2]}")
+                hierarchical_keywords_data = response.get(
+                    'hierarchical_keywords', [])
 
-                # Use static method directly
-                hierarchical_keywords = LLMResponseParser.parse_hierarchical_keywords(
-                    response, document_id)
+                # Log a preview of the data
+                preview = hierarchical_keywords_data[:2] if isinstance(
+                    hierarchical_keywords_data, list) else hierarchical_keywords_data
+                logger.info(f"Hierarchical keywords data preview: {preview}")
 
-                if hierarchical_keywords:
-                    logger.info(
-                        f"Found {len(hierarchical_keywords)} parsed keywords")
-                    for keyword in hierarchical_keywords:
-                        db.session.add(keyword)
+                # Process the keywords using the manager
+                if hierarchical_keywords_data:
+                    success = DocumentKeywordManager.process_document_keywords(
+                        document_id=document_id,
+                        keyword_data=hierarchical_keywords_data,
+                        max_keywords=10  # Limit to 10 keywords
+                    )
 
-                    # Commit the keywords separately to ensure they're saved
-                    db.session.commit()
-                    logger.info(
-                        f"Successfully stored {len(hierarchical_keywords)} hierarchical keywords")
-
-                    # Verify storage
-                    from src.catalog.models import DocumentKeyword
-                    count = DocumentKeyword.query.filter_by(
-                        document_id=document_id).count()
-                    logger.info(
-                        f"Verification: {count} document keywords found in database for document {document_id}")
+                    if success:
+                        logger.info(
+                            f"Successfully processed hierarchical keywords for document {document_id}")
+                    else:
+                        logger.error(
+                            f"Failed to process hierarchical keywords for document {document_id}")
                 else:
                     logger.warning(
-                        f"No hierarchical keywords were parsed for document {document_id}")
+                        f"No hierarchical keywords data found for document {document_id}")
+
             except Exception as e:
                 logger.error(
                     f"Error processing hierarchical keywords: {str(e)}")
@@ -527,7 +528,8 @@ def store_partial_analysis(document_id: int, response: dict):
                 db.session.rollback()
 
     except Exception as e:
-        logger.error(f"Error storing partial analysis results: {str(e)}")
+        logger.error(
+            f"Error storing partial analysis results: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         db.session.rollback()
         return False
