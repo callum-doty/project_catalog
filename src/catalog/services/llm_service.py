@@ -1,22 +1,23 @@
-
+# src/catalog/services/llm_service.py
 import os
 import json
 import httpx
 import time
 import base64
 from typing import Dict, Any, List, Optional
-from catalog.services.prompt_manager import PromptManager
-from celery.utils.log import get_task_logger
-import backoff
-from catalog.constants import MODEL_SETTINGS, ERROR_MESSAGES
+from src.catalog.services.prompt_manager import PromptManager
+import logging
+import traceback
+from src.catalog.constants import MODEL_SETTINGS, ERROR_MESSAGES
 
-logger = get_task_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class LLMService:
     def __init__(self):
         self.api_key = os.getenv("CLAUDE_API_KEY")
         if not self.api_key:
+            logger.error("CLAUDE_API_KEY environment variable is not set!")
             raise ValueError(ERROR_MESSAGES['AUTHENTICATION_FAILED'])
 
         self.headers = {
@@ -36,7 +37,7 @@ class LLMService:
     def _get_file_data(self, filename: str) -> dict:
         """Get file data and path from storage if available"""
         try:
-            from catalog.services.storage_service import MinIOStorage
+            from src.catalog.services.storage_service import MinIOStorage
             storage = MinIOStorage()
 
             # Check if file exists in storage
@@ -91,6 +92,8 @@ class LLMService:
 
         # Prepare image data once for all components
         image_data = self._prepare_image_data(document_path)
+        if not image_data:
+            logger.warning(f"Could not prepare image data for {filename}")
 
         # Initialize combined results
         results = {}
@@ -110,7 +113,7 @@ class LLMService:
                 # Call Claude API for this component
                 logger.info(f"Processing component: {component}")
                 component_result = self._call_claude_api_sync(
-                    prompt, image_data)
+                    prompt, image_data, max_retries=3)
 
                 # Store result for this component
                 if component_result:
@@ -121,12 +124,12 @@ class LLMService:
                     # Add to combined results
                     results.update(component_result)
                     logger.info(
-                        f"Successfully processed component: {component}")
+                        f"Successfully processed component: {component}, result keys: {list(component_result.keys())}")
                 else:
                     logger.warning(f"No result for component: {component}")
             except Exception as e:
                 logger.error(
-                    f"Error processing component {component}: {str(e)}")
+                    f"Error processing component {component}: {str(e)}", exc_info=True)
                 # Continue with other components rather than failing completely
 
         return results
@@ -193,6 +196,19 @@ class LLMService:
         except Exception as e:
             logger.error(f"Failed to encode image {image_path}: {str(e)}")
             raise
+
+    def _get_media_type(self, file_path: str) -> str:
+        """Determine media type from file path"""
+        ext = os.path.splitext(file_path.lower())[1]
+        if ext == '.jpg' or ext == '.jpeg':
+            return 'image/jpeg'
+        elif ext == '.png':
+            return 'image/png'
+        elif ext == '.gif':
+            return 'image/gif'
+        elif ext == '.pdf':
+            return 'application/pdf'
+        return 'application/octet-stream'
 
     def _get_component_prompt(self, component: str, filename: str, metadata: Optional[Dict] = None) -> Optional[Dict]:
         """Get prompt for specific component"""
@@ -275,7 +291,8 @@ class LLMService:
                     })
 
                     # Make request
-                    logger.info(f"Sending request to Claude API")
+                    logger.info(
+                        f"Sending request to Claude API for {self.model}")
                     response = client.post(
                         "https://api.anthropic.com/v1/messages",
                         headers=self.headers,
@@ -293,9 +310,10 @@ class LLMService:
                             pass
                         logger.error(
                             f"API returned {response.status_code}: {error_detail}")
+                        raise Exception(
+                            f"API error: {response.status_code} - {error_detail}")
 
-                    # Check response
-                    response.raise_for_status()
+                    # Process response
                     data = response.json()
 
                     # Process response content
@@ -305,110 +323,78 @@ class LLMService:
                         if block.get('type') == 'text':
                             message_text += block.get('text', '')
 
+                    # Log response summary for debugging
+                    if message_text:
+                        preview = message_text[:200] + \
+                            "..." if len(message_text) > 200 else message_text
+                        logger.info(
+                            f"Received response from Claude (preview): {preview}")
+                    else:
+                        logger.warning("Received empty response from Claude")
+
                     # Extract JSON
                     try:
-                        # First, try to find JSON within markers
-                        json_start = message_text.find('{')
-                        json_end = message_text.rfind('}') + 1
+                        # Try to find valid JSON in the response
+                        json_matches = []
 
-                        if json_start >= 0 and json_end > json_start:
-                            json_str = message_text[json_start:json_end]
-                            try:
-                                result = json.loads(json_str)
-                                logger.info(
-                                    f"Successfully parsed JSON response")
-                                return result
-                            except json.JSONDecodeError:
-                                # If the extracted JSON is invalid, try parsing the whole text
-                                try:
-                                    result = json.loads(message_text)
-                                    logger.info(
-                                        f"Successfully parsed full text as JSON")
-                                    return result
-                                except json.JSONDecodeError as e:
-                                    logger.error(f"JSON parse error: {str(e)}")
-                                    logger.error(
-                                        f"Failed JSON string: {message_text[:100]}...")
-                                    retry_count += 1
-                                    time.sleep(2 ** retry_count)
-                                    continue
-                        else:
-                            # Try parsing the whole message as JSON
-                            try:
-                                result = json.loads(message_text)
-                                logger.info(
-                                    f"Successfully parsed full text as JSON")
-                                return result
-                            except json.JSONDecodeError:
-                                logger.error("No valid JSON found in response")
-                                retry_count += 1
-                                time.sleep(2 ** retry_count)
-                                continue
+                        # Look for JSON within the entire text first
+                        try:
+                            result = json.loads(message_text)
+                            return result
+                        except json.JSONDecodeError:
+                            # Not valid JSON, continue with partial extraction
+                            pass
+
+                        # Find all potential JSON objects
+                        depth = 0
+                        start_idx = None
+
+                        for i, char in enumerate(message_text):
+                            if char == '{' and start_idx is None:
+                                start_idx = i
+                                depth = 1
+                            elif char == '{' and start_idx is not None:
+                                depth += 1
+                            elif char == '}' and start_idx is not None:
+                                depth -= 1
+                                if depth == 0:
+                                    json_candidate = message_text[start_idx:i+1]
+                                    try:
+                                        json_obj = json.loads(json_candidate)
+                                        json_matches.append(json_obj)
+                                    except:
+                                        pass
+                                    start_idx = None
+
+                        # If we found any valid JSON objects
+                        if json_matches:
+                            # Return the first valid match
+                            return json_matches[0]
+
+                        # If we get here, no valid JSON was found
+                        logger.error("No valid JSON found in response")
+                        retry_count += 1
+                        time.sleep(2)
+                        continue
+
                     except Exception as e:
                         logger.error(f"Error extracting JSON: {str(e)}")
                         retry_count += 1
-                        time.sleep(2 ** retry_count)
+                        time.sleep(2)
                         continue
 
             except httpx.HTTPStatusError as e:
                 logger.error(f"API call error: {str(e)}")
-
-                # Use a simplified payload for retry if we get a 400 error
-                if "400 Bad Request" in str(e) and retry_count == max_retries - 1:
-                    logger.info("Trying simplified payload for final retry")
-                    # Try a simpler payload structure
-                    if isinstance(prompt, dict) and "user" in prompt:
-                        simplified_payload = {
-                            "model": self.model,
-                            "messages": [
-                                {
-                                    "role": "user",
-                                    "content": prompt["user"]
-                                }
-                            ],
-                            "max_tokens": 4096,
-                            "temperature": 0
-                        }
-
-                        try:
-                            response = client.post(
-                                "https://api.anthropic.com/v1/messages",
-                                headers=self.headers,
-                                json=simplified_payload
-                            )
-                            response.raise_for_status()
-                            data = response.json()
-
-                            # Process simplified response
-                            content = data.get('content', [])
-                            message_text = ""
-                            for block in content:
-                                if block.get('type') == 'text':
-                                    message_text += block.get('text', '')
-
-                            # Try to extract JSON
-                            json_start = message_text.find('{')
-                            json_end = message_text.rfind('}') + 1
-
-                            if json_start >= 0 and json_end > json_start:
-                                json_str = message_text[json_start:json_end]
-                                result = json.loads(json_str)
-                                logger.info(
-                                    f"Successfully parsed JSON from simplified request")
-                                return result
-                        except Exception as simplify_error:
-                            logger.error(
-                                f"Simplified payload also failed: {str(simplify_error)}")
-
                 retry_count += 1
                 last_error = str(e)
-                time.sleep(2 ** retry_count)
+                time.sleep(2 * retry_count)  # Exponential backoff
                 continue
+
             except Exception as e:
                 logger.error(f"API call error: {str(e)}")
                 retry_count += 1
                 last_error = str(e)
-                time.sleep(2 ** retry_count)
+                time.sleep(2 * retry_count)  # Exponential backoff
                 continue
 
         # If we get here, all retries failed

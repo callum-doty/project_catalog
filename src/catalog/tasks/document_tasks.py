@@ -254,53 +254,11 @@ def process_document(self, filename, minio_path, document_id):
 
 
 def store_partial_analysis(document_id: int, response: dict):
-    """Simplified version for testing"""
-    from src.catalog.services.llm_parser import LLMResponseParser
-
-    if not response:
-        logger.warning(f"Empty response for document {document_id}")
-        return False
-
-    try:
-        parser = LLMResponseParser()
-
-        # Focus only on document_analysis first (most critical component)
-        if "document_analysis" in response:
-            try:
-                llm_analysis_data = parser.parse_llm_analysis(
-                    {"document_analysis": response["document_analysis"]})
-
-                # Print the data to be stored
-                logger.info(f"Analysis data to save: {llm_analysis_data}")
-
-                # Create new record directly
-                llm_analysis = LLMAnalysis(
-                    document_id=document_id,
-                    **llm_analysis_data
-                )
-                db.session.add(llm_analysis)
-                db.session.commit()
-
-                logger.info(
-                    f"Successfully stored document analysis with ID: {llm_analysis.id}")
-                return True
-
-            except Exception as e:
-                logger.error(f"Error storing document analysis: {str(e)}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                db.session.rollback()
-                return False
-
-    except Exception as e:
-        logger.error(f"Error in store_partial_analysis: {str(e)}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        db.session.rollback()
-        return False
-
-
-def store_partial_analysis(document_id: int, response: dict):
     """Store partial analysis results in database"""
     from src.catalog.services.llm_parser import LLMResponseParser
+
+    logger.info(f"Starting store_partial_analysis for document {document_id}")
+    logger.info(f"Response keys: {list(response.keys())}")
 
     if not response:
         logger.warning(f"Empty response for document {document_id}")
@@ -312,6 +270,8 @@ def store_partial_analysis(document_id: int, response: dict):
         # Store document analysis (metadata) if present
         if "document_analysis" in response:
             try:
+                logger.info(
+                    f"Processing document_analysis for document {document_id}")
                 llm_analysis_data = parser.parse_llm_analysis(
                     {"document_analysis": response["document_analysis"]})
 
@@ -326,6 +286,8 @@ def store_partial_analysis(document_id: int, response: dict):
                     # Update existing record
                     for key, value in llm_analysis_data.items():
                         setattr(llm_analysis, key, value)
+                    logger.info(
+                        f"Updated existing LLM analysis for document {document_id}")
                 else:
                     # Create new record
                     llm_analysis = LLMAnalysis(
@@ -333,23 +295,26 @@ def store_partial_analysis(document_id: int, response: dict):
                         **llm_analysis_data
                     )
                     db.session.add(llm_analysis)
+                    logger.info(
+                        f"Created new LLM analysis for document {document_id}")
 
                 # Commit immediately for this critical component
                 db.session.commit()
                 logger.info(f"Successfully stored document analysis")
 
                 # Verify the record was saved
-                if LLMAnalysis.query.filter_by(document_id=document_id).first() is not None:
+                verification = LLMAnalysis.query.filter_by(
+                    document_id=document_id).first()
+                if verification is not None:
                     logger.info("Verified LLM Analysis was saved correctly")
                 else:
-                    logger.warning("LLM Analysis failed to save to database!")
+                    logger.error(
+                        "LLM Analysis failed to save to database despite successful commit!")
 
             except Exception as e:
                 logger.error(f"Error storing document analysis: {str(e)}")
                 logger.error(f"Traceback: {traceback.format_exc()}")
                 db.session.rollback()
-
-        # Continue with remaining components, but commit after each one
 
         # Store classification if present
         if "classification" in response:
@@ -418,8 +383,6 @@ def store_partial_analysis(document_id: int, response: dict):
                 logger.error(f"Error storing extracted text: {str(e)}")
                 logger.error(f"Traceback: {traceback.format_exc()}")
                 db.session.rollback()
-
-        # Process remaining components with individual commits
 
         # Store design elements if present
         if "design_elements" in response:
