@@ -9,6 +9,9 @@ from src.catalog import db
 logger = logging.getLogger(__name__)
 
 
+logger = logging.getLogger(__name__)
+
+
 class LLMResponseParser:
 
     @staticmethod
@@ -46,21 +49,33 @@ class LLMResponseParser:
     def parse_llm_analysis(data: Dict[str, Any]) -> Dict[str, Any]:
         """Parse and validate basic LLM analysis data"""
         try:
+            # Log the input data structure for debugging
             logger.info(
-                f"Starting LLM analysis parsing with data: {json.dumps(data)[:200]}...")
+                f"Starting LLM analysis parsing with data keys: {list(data.keys())}")
 
+            # Check for null or empty data
+            if not data:
+                logger.warning("Empty data provided to parse_llm_analysis")
+                raise ValueError("Empty data provided")
+
+            # Extract document_analysis safely
             analysis = data.get('document_analysis', {})
             if not analysis:
                 logger.warning("No document_analysis found in LLM response")
                 analysis = {}
 
-            # Convert to string if the analysis is a string
+            # Log the analysis data structure
+            logger.info(
+                f"Analysis data type: {type(analysis)}, structure: {analysis if isinstance(analysis, dict) else 'non-dict'}")
+
+            # Convert to dict if the analysis is a string
             if isinstance(analysis, str):
                 try:
                     analysis = json.loads(analysis)
-                except:
+                    logger.info("Successfully parsed string analysis as JSON")
+                except json.JSONDecodeError as e:
                     logger.warning(
-                        f"Could not parse document_analysis as JSON: {analysis[:100]}...")
+                        f"Could not parse document_analysis as JSON: {str(e)}")
                     analysis = {"summary": analysis}
 
             # Handle unexpected data structure
@@ -69,31 +84,41 @@ class LLMResponseParser:
                     f"document_analysis is not a dictionary: {type(analysis)}")
                 analysis = {"summary": str(analysis)}
 
+            # Extract fields with safe fallbacks
+            summary = analysis.get('summary', '')
+            confidence_score = analysis.get('confidence_score', 0.0)
+            campaign_type = analysis.get('campaign_type', '')
+            election_year = analysis.get('election_year', '')
+            document_tone = analysis.get('document_tone', '')
+
+            # Log extractions for debugging
+            logger.info(f"Extracted summary: {summary[:50]}...")
+            logger.info(f"Extracted confidence: {confidence_score}")
+
+            # Safely convert and validate data
             result = {
-                'summary_description': LLMResponseParser.ensure_string(analysis.get('summary', '')),
+                'summary_description': LLMResponseParser.ensure_string(summary),
                 'content_analysis': json.dumps(analysis),
-                'confidence_score': LLMResponseParser.validate_confidence(
-                    analysis.get('confidence_score', 0.0)
-                ),
-                'campaign_type': LLMResponseParser.ensure_string(analysis.get('campaign_type', '')),
-                'election_year': LLMResponseParser.ensure_string(analysis.get('election_year', '')),
-                'document_tone': LLMResponseParser.ensure_string(analysis.get('document_tone', '')),
+                'confidence_score': LLMResponseParser.validate_confidence(confidence_score),
+                'campaign_type': LLMResponseParser.ensure_string(campaign_type),
+                'election_year': LLMResponseParser.ensure_string(election_year),
+                'document_tone': LLMResponseParser.ensure_string(document_tone),
                 'analysis_date': datetime.utcnow(),
                 'model_version': 'claude-3-opus-20240229'
             }
 
             logger.info(
-                f"Parsed basic LLM analysis with summary: {result['summary_description'][:50]}...")
-            logger.info(f"Full result: {json.dumps(result)}")
+                f"Successfully parsed LLM analysis with summary: {result['summary_description'][:50]}...")
             return result
 
         except Exception as e:
             logger.error(f"Error parsing LLM analysis: {str(e)}")
-            logger.error(traceback.format_exc())
+            logger.error(f"Exception type: {type(e).__name__}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
 
             # Return minimal valid data
             return {
-                'summary_description': "Error parsing analysis",
+                'summary_description': f"Error parsing analysis: {str(e)}",
                 'content_analysis': json.dumps({"error": str(e)}),
                 'confidence_score': 0.0,
                 'campaign_type': '',
@@ -323,6 +348,72 @@ class LLMResponseParser:
             }
 
     @staticmethod
+    def parse_extracted_text(data: Dict[str, Any]) -> Dict[str, Any]:
+        """Parse and validate extracted text data"""
+        try:
+            text_data = data.get('extracted_text', {})
+
+            # Handle string or other non-dict values
+            if not isinstance(text_data, dict):
+                logger.warning(
+                    f"extracted_text is not a dictionary: {type(text_data)}")
+                if isinstance(text_data, str):
+                    try:
+                        text_data = json.loads(text_data)
+                    except:
+                        text_data = {"text_content": text_data}
+                else:
+                    text_data = {"text_content": str(text_data)}
+
+            if not text_data:
+                logger.warning("No extracted_text found in LLM response")
+                text_data = {}
+
+            # Create a combined text content from main message and supporting text
+            main_message = LLMResponseParser.ensure_string(
+                text_data.get('main_message', ''))
+            supporting_text = LLMResponseParser.ensure_string(
+                text_data.get('supporting_text', ''))
+
+            # Combine for backwards compatibility with existing field
+            combined_text = f"{main_message}\n\n{supporting_text}"
+
+            result = {
+                'text_content': combined_text,
+                'main_message': main_message,
+                'supporting_text': supporting_text,
+                'call_to_action': LLMResponseParser.ensure_string(text_data.get('call_to_action', '')),
+                'candidate_name': LLMResponseParser.ensure_string(text_data.get('candidate_name', '')),
+                'opponent_name': LLMResponseParser.ensure_string(text_data.get('opponent_name', '')),
+                'confidence': int(LLMResponseParser.validate_confidence(
+                    text_data.get('confidence', 0.0)
+                ) * 100),
+                'extraction_date': datetime.utcnow(),
+                'page_number': 1  # Default page number
+            }
+
+            logger.info(
+                f"Parsed extracted text with main message: {main_message[:50]}...")
+            return result
+
+        except Exception as e:
+            logger.error(f"Error parsing extracted text: {str(e)}")
+            logger.error(traceback.format_exc())
+
+            # Return minimal valid data
+            return {
+                'text_content': "Error parsing text",
+                'main_message': "Error parsing text",
+                'supporting_text': "",
+                'call_to_action': "",
+                'candidate_name': "",
+                'opponent_name': "",
+                'confidence': 0,
+                'extraction_date': datetime.utcnow(),
+                'page_number': 1
+            }
+
+    @staticmethod
     def parse_hierarchical_keywords(data: Dict[str, Any], document_id: int) -> List[DocumentKeyword]:
         """
         Parse hierarchical keywords and map to taxonomy.
@@ -435,132 +526,3 @@ class LLMResponseParser:
             logger.error(f"Error parsing hierarchical keywords: {str(e)}")
             logger.error(traceback.format_exc())
             return []
-
-    @staticmethod
-    def parse_extracted_text(data: Dict[str, Any]) -> Dict[str, Any]:
-        """Parse and validate extracted text data"""
-        try:
-            text_data = data.get('extracted_text', {})
-
-            # Handle string or other non-dict values
-            if not isinstance(text_data, dict):
-                logger.warning(
-                    f"extracted_text is not a dictionary: {type(text_data)}")
-                if isinstance(text_data, str):
-                    try:
-                        text_data = json.loads(text_data)
-                    except:
-                        text_data = {"text_content": text_data}
-                else:
-                    text_data = {"text_content": str(text_data)}
-
-            if not text_data:
-                logger.warning("No extracted_text found in LLM response")
-                text_data = {}
-
-            # Create a combined text content from main message and supporting text
-            main_message = LLMResponseParser.ensure_string(
-                text_data.get('main_message', ''))
-            supporting_text = LLMResponseParser.ensure_string(
-                text_data.get('supporting_text', ''))
-
-            # Combine for backwards compatibility with existing field
-            combined_text = f"{main_message}\n\n{supporting_text}"
-
-            result = {
-                'text_content': combined_text,
-                'main_message': main_message,
-                'supporting_text': supporting_text,
-                'call_to_action': LLMResponseParser.ensure_string(text_data.get('call_to_action', '')),
-                'candidate_name': LLMResponseParser.ensure_string(text_data.get('candidate_name', '')),
-                'opponent_name': LLMResponseParser.ensure_string(text_data.get('opponent_name', '')),
-                'confidence': int(LLMResponseParser.validate_confidence(
-                    text_data.get('confidence', 0.0)
-                ) * 100),
-                'extraction_date': datetime.utcnow(),
-                'page_number': 1  # Default page number
-            }
-
-            logger.info(
-                f"Parsed extracted text with main message: {main_message[:50]}...")
-            return result
-
-        except Exception as e:
-            logger.error(f"Error parsing extracted text: {str(e)}")
-            logger.error(traceback.format_exc())
-
-            # Return minimal valid data
-            return {
-                'text_content': "Error parsing text",
-                'main_message': "Error parsing text",
-                'supporting_text': "",
-                'call_to_action': "",
-                'candidate_name': "",
-                'opponent_name': "",
-                'confidence': 0,
-                'extraction_date': datetime.utcnow(),
-                'page_number': 1
-            }
-
-    @staticmethod
-    def process_document_analysis(data: Dict[str, Any], document_id: int) -> bool:
-        """
-        Process the entire document analysis and store in database.
-        This is a comprehensive method that handles all parts of the analysis.
-        """
-        try:
-            # Process standard analysis fields using existing parser methods
-            parser = LLMResponseParser()
-
-            # Basic LLM analysis
-            llm_analysis_data = parser.parse_llm_analysis(data)
-            from src.catalog.models import LLMAnalysis
-            llm_analysis = LLMAnalysis(
-                document_id=document_id,
-                **llm_analysis_data
-            )
-            db.session.add(llm_analysis)
-            db.session.flush()  # Get the ID
-
-            # Process other standard components
-            for component in ['extracted_text', 'design_elements', 'classification', 'entity_info', 'communication_focus']:
-                try:
-                    method_name = f'parse_{component}'
-                    if hasattr(parser, method_name):
-                        component_data = getattr(parser, method_name)(data)
-
-                        # Map component to model
-                        component_to_model = {
-                            'extracted_text': 'ExtractedText',
-                            'design_elements': 'DesignElement',
-                            'classification': 'Classification',
-                            'entity_info': 'Entity',
-                            'communication_focus': 'CommunicationFocus'
-                        }
-
-                        if component in component_to_model:
-                            from importlib import import_module
-                            model_class = getattr(import_module(
-                                'src.catalog.models'), component_to_model[component])
-                            model_instance = model_class(
-                                document_id=document_id, **component_data)
-                            db.session.add(model_instance)
-                except Exception as e:
-                    logger.error(f"Error processing {component}: {str(e)}")
-
-            # Process hierarchical keywords
-            hierarchical_keywords = LLMResponseParser.parse_hierarchical_keywords(
-                data, document_id)
-            for keyword in hierarchical_keywords:
-                db.session.add(keyword)
-
-            # Commit all changes
-            db.session.commit()
-            logger.info(
-                f"Successfully processed complete document analysis for document {document_id}")
-            return True
-
-        except Exception as e:
-            logger.error(f"Error processing document analysis: {str(e)}")
-            db.session.rollback()
-            raise

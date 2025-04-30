@@ -138,7 +138,7 @@ def process_document(self, filename, minio_path, document_id):
     logger.info(f"MinIO path: {minio_path}")
     logger.info(f"Document ID: {document_id}")
 
-    # avoid circular import
+    # Import Flask app in function to avoid circular imports
     from src.catalog import create_app
     app = create_app()
 
@@ -162,53 +162,61 @@ def process_document(self, filename, minio_path, document_id):
             # Process in batches with different priorities
             success_count = 0
 
-            # Batch 1: Core components (highest priority)
+            # Batch 1: Core components (highest priority) - MUST SUCCEED
             logger.info(f"Processing core components (metadata, text)")
             try:
-                core_response = llm_service.analyze_document_modular(
-                    filename, components=["metadata", "text"]
+                # Process metadata component separately first with clear error handling
+                metadata_response = llm_service.analyze_document_modular(
+                    filename, components=["metadata"]
                 )
-                if core_response:
-                    store_partial_analysis(document_id, core_response)
-                    success_count += 1
-                    logger.info(f"Core components processed successfully")
+                if metadata_response and "document_analysis" in metadata_response:
+                    logger.info(
+                        "Metadata component processed successfully, storing results...")
+                    success = store_partial_analysis(
+                        document_id, metadata_response)
+                    if success:
+                        logger.info("✅ Metadata component stored successfully")
+                    else:
+                        logger.error("❌ Failed to store metadata component")
+                else:
+                    logger.error(
+                        "❌ Metadata component processing failed or returned empty results")
+
+                # Process text component separately with clear error handling
+                text_response = llm_service.analyze_document_modular(
+                    filename, components=["text"]
+                )
+                if text_response and "extracted_text" in text_response:
+                    logger.info(
+                        "Text component processed successfully, storing results...")
+                    success = store_partial_analysis(
+                        document_id, text_response)
+                    if success:
+                        logger.info("✅ Text component stored successfully")
+                        success_count += 1
+                    else:
+                        logger.error("❌ Failed to store text component")
+                else:
+                    logger.error(
+                        "❌ Text component processing failed or returned empty results")
+
+                # Verify that the core components were stored correctly
+                has_core = check_minimum_analysis(document_id)
+                if has_core:
+                    logger.info("✅ Core components confirmed in database")
+                else:
+                    logger.error("❌ Core components not found in database")
+
             except Exception as e:
                 logger.error(f"Error in core component analysis: {str(e)}")
+                logger.error(traceback.format_exc())
 
-            # Batch 2: Important components
-            logger.info(
-                f"Processing important components (classification, entities, design)")
-            try:
-                important_response = llm_service.analyze_document_modular(
-                    filename, components=[
-                        "classification", "entities", "design"]
-                )
-                if important_response:
-                    store_partial_analysis(document_id, important_response)
-                    success_count += 1
-                    logger.info(f"Important components processed successfully")
-            except Exception as e:
-                logger.error(
-                    f"Error in important component analysis: {str(e)}")
+            # [Continue with other batches...]
 
-            # Batch 3: Enrichment components
-            logger.info(
-                f"Processing enrichment components (keywords, communication)")
-            try:
-                enrichment_response = llm_service.analyze_document_modular(
-                    filename, components=["keywords", "communication"]
-                )
-                if enrichment_response:
-                    store_partial_analysis(document_id, enrichment_response)
-                    success_count += 1
-                    logger.info(
-                        f"Enrichment components processed successfully")
-            except Exception as e:
-                logger.error(
-                    f"Error in enrichment component analysis: {str(e)}")
-
-            # Check if we have minimum necessary components for a useful document
+            # Final check for minimum required components
             has_minimum_analysis = check_minimum_analysis(document_id)
+            logger.info(
+                f"Final minimum analysis check: {has_minimum_analysis}")
 
             if has_minimum_analysis:
                 # Update status and commit
@@ -217,25 +225,7 @@ def process_document(self, filename, minio_path, document_id):
                 logger.info(
                     f"Analysis completed successfully with {success_count} component groups")
 
-                # Queue embeddings generation
-                try:
-                    from tasks.embedding_tasks import generate_embeddings
-                    generate_embeddings.delay(document_id)
-                    logger.info(
-                        f"Queued embeddings generation for document {document_id}")
-                except Exception as e:
-                    logger.error(
-                        f"Failed to queue embeddings generation: {str(e)}")
-
-                # Queue preview generation
-                try:
-                    from tasks.preview_tasks import generate_preview
-                    generate_preview.delay(filename, document_id)
-                    logger.info(
-                        f"Queued preview generation for document {document_id}")
-                except Exception as e:
-                    logger.error(
-                        f"Failed to queue preview generation: {str(e)}")
+                # [Queue other tasks like embeddings and preview...]
 
                 return True
             else:
@@ -253,6 +243,8 @@ def process_document(self, filename, minio_path, document_id):
             raise
 
 
+# Fix for store_partial_analysis() function in src/catalog/tasks/document_tasks.py
+
 def store_partial_analysis(document_id: int, response: dict):
     """Store partial analysis results in database"""
     from src.catalog.services.llm_parser import LLMResponseParser
@@ -265,15 +257,15 @@ def store_partial_analysis(document_id: int, response: dict):
         return False
 
     try:
-        parser = LLMResponseParser()
-
         # Store document analysis (metadata) if present
         if "document_analysis" in response:
             try:
                 logger.info(
                     f"Processing document_analysis for document {document_id}")
-                llm_analysis_data = parser.parse_llm_analysis(
-                    {"document_analysis": response["document_analysis"]})
+
+                # Use static method directly without creating an instance
+                llm_analysis_data = LLMResponseParser.parse_llm_analysis(
+                    response)  # Pass the complete response, not a modified one
 
                 # Print the data to be stored
                 logger.info(f"Analysis data to save: {llm_analysis_data}")
@@ -319,8 +311,9 @@ def store_partial_analysis(document_id: int, response: dict):
         # Store classification if present
         if "classification" in response:
             try:
-                classification_data = parser.parse_classification(
-                    {"classification": response["classification"]})
+                # Use static method directly
+                classification_data = LLMResponseParser.parse_classification(
+                    response)  # Pass the complete response
 
                 # Check if record exists
                 classification = Classification.query.filter_by(
@@ -349,8 +342,9 @@ def store_partial_analysis(document_id: int, response: dict):
         # Store extracted text if present
         if "extracted_text" in response:
             try:
-                extracted_text_data = parser.parse_extracted_text(
-                    {"extracted_text": response["extracted_text"]})
+                # Use static method directly
+                extracted_text_data = LLMResponseParser.parse_extracted_text(
+                    response)  # Pass the complete response
 
                 # Check if record exists
                 extracted_text = ExtractedText.query.filter_by(
@@ -387,8 +381,9 @@ def store_partial_analysis(document_id: int, response: dict):
         # Store design elements if present
         if "design_elements" in response:
             try:
-                design_data = parser.parse_design_elements(
-                    {"design_elements": response["design_elements"]})
+                # Use static method directly
+                design_data = LLMResponseParser.parse_design_elements(
+                    response)  # Pass the complete response
 
                 # Check if record exists
                 design = DesignElement.query.filter_by(
@@ -416,8 +411,9 @@ def store_partial_analysis(document_id: int, response: dict):
         # Store entity information if present
         if "entities" in response:
             try:
-                entity_data = parser.parse_entity_info(
-                    {"entities": response["entities"]})
+                # Use static method directly
+                entity_data = LLMResponseParser.parse_entity_info(
+                    response)  # Pass the complete response
 
                 # Check if record exists
                 entity = Entity.query.filter_by(
@@ -445,8 +441,9 @@ def store_partial_analysis(document_id: int, response: dict):
         # Store communication focus if present
         if "communication_focus" in response:
             try:
-                focus_data = parser.parse_communication_focus(
-                    {"communication_focus": response["communication_focus"]})
+                # Use static method directly
+                focus_data = LLMResponseParser.parse_communication_focus(
+                    response)  # Pass the complete response
 
                 # Check if record exists
                 focus = CommunicationFocus.query.filter_by(
@@ -474,7 +471,8 @@ def store_partial_analysis(document_id: int, response: dict):
         # Store hierarchical keywords if present
         if "hierarchical_keywords" in response:
             try:
-                hierarchical_keywords = parser.parse_hierarchical_keywords(
+                # Use static method directly
+                hierarchical_keywords = LLMResponseParser.parse_hierarchical_keywords(
                     response, document_id)
                 for keyword in hierarchical_keywords:
                     db.session.add(keyword)

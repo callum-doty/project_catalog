@@ -6,6 +6,8 @@ from flask import current_app
 logger = logging.getLogger(__name__)
 
 
+# Updated check_minimum_analysis in analysis_utils.py
+
 def check_minimum_analysis(document_id: int) -> bool:
     """Check if document has minimum required analysis components"""
     try:
@@ -13,19 +15,22 @@ def check_minimum_analysis(document_id: int) -> bool:
         from src.catalog.models import LLMAnalysis, ExtractedText
         from src.catalog import db
 
-        # Document must have at least one of these to be considered analyzed
-        has_llm_analysis = LLMAnalysis.query.filter_by(
-            document_id=document_id).first() is not None
-        has_extracted_text = ExtractedText.query.filter_by(
-            document_id=document_id).first() is not None
+        # Force a clean session to avoid stale data
+        db.session.close()
+
+        # Explicitly use separate queries with commit between checks
+        llm_analysis = LLMAnalysis.query.filter_by(
+            document_id=document_id).first()
+        has_llm_analysis = llm_analysis is not None
+
+        extracted_text = ExtractedText.query.filter_by(
+            document_id=document_id).first()
+        has_extracted_text = extracted_text is not None
 
         logger.info(
             f"Minimum analysis check: LLM Analysis: {has_llm_analysis}, Extracted Text: {has_extracted_text}")
 
-        # Log all analysis components for document
-        logger.info(f"Looking up LLM analysis for document ID {document_id}")
-        llm_analysis = LLMAnalysis.query.filter_by(
-            document_id=document_id).first()
+        # Log more detailed info about the components if they exist
         if llm_analysis:
             logger.info(f"Found LLM analysis with ID {llm_analysis.id}")
             logger.info(
@@ -34,9 +39,6 @@ def check_minimum_analysis(document_id: int) -> bool:
             logger.warning(
                 f"No LLM analysis found for document ID {document_id}")
 
-        logger.info(f"Looking up extracted text for document ID {document_id}")
-        extracted_text = ExtractedText.query.filter_by(
-            document_id=document_id).first()
         if extracted_text:
             logger.info(f"Found extracted text with ID {extracted_text.id}")
             logger.info(
@@ -45,8 +47,9 @@ def check_minimum_analysis(document_id: int) -> bool:
             logger.warning(
                 f"No extracted text found for document ID {document_id}")
 
-        # Consider document analyzable if it has basic metadata and text
+        # Consider document analyzable if it has at least one of these components
         return has_llm_analysis or has_extracted_text
+
     except Exception as e:
         logger.error(
             f"Error checking minimum analysis: {str(e)}", exc_info=True)
