@@ -137,6 +137,14 @@ def index():
     return redirect(url_for('main_routes.search_documents'))
 
 
+@main_routes.route('/admin', defaults={'path': ''})
+@main_routes.route('/admin/<path:path>')
+def serve_admin(path):
+    """Serve the admin React app for all admin routes"""
+    # This will serve your React app's index.html
+    return render_template('admin/index.html')
+
+
 @main_routes.route('/dashboard')
 @monitor_query
 def dashboard():
