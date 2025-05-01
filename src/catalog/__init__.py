@@ -6,6 +6,7 @@ from flask_caching import Cache
 from flask_wtf.csrf import CSRFProtect
 import os
 
+
 # Create extension instances
 db = SQLAlchemy()
 migrate = Migrate()

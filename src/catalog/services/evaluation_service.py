@@ -22,6 +22,15 @@ logger = logging.getLogger(__name__)
 class EvaluationService:
     """Service for evaluating document processing quality at various checkpoints."""
 
+    def __init__(self, db=None):
+        """Initialize with optional db instance"""
+        if db is None:
+            # Import here to avoid circular imports
+            from src.catalog import db as catalog_db
+            self.db = catalog_db
+        else:
+            self.db = db
+
     def __init__(self):
         """Initialize the evaluation service with default settings."""
         self.logger = logging.getLogger(__name__)
