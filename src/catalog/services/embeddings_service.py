@@ -1,4 +1,3 @@
-
 import os
 import httpx
 import numpy as np
@@ -247,6 +246,65 @@ class EmbeddingsService:
         name_indicators = [word for word in query.split() if word[0].isupper()]
         if name_indicators and any(term in query.lower() for term in ["vote", "election", "candidate", "campaign", "senator", "representative", "governor"]):
             enhanced_query += " politician candidate election campaign office position representative political"
+
+        # Add temporal context if relevant
+        temporal_terms = {
+            "recent": "recent current latest present contemporary modern up_to_date",
+            "past": "past previous former historical earlier prior old",
+            "future": "future upcoming planned proposed prospective forthcoming",
+            "election cycle": "election_cycle campaign_period voting_season electoral_period political_season"
+        }
+
+        for term, context in temporal_terms.items():
+            if term in query.lower():
+                enhanced_query += " " + context
+
+        # Add geographic context if relevant
+        geographic_terms = {
+            "state": "state regional local district county municipal jurisdiction",
+            "national": "national federal countrywide nationwide domestic",
+            "local": "local community neighborhood district municipal county",
+            "district": "district constituency precinct ward division electoral_area"
+        }
+
+        for term, context in geographic_terms.items():
+            if term in query.lower():
+                enhanced_query += " " + context
+
+        # Add document type context
+        document_types = {
+            "mailer": "mailer direct_mail campaign_literature political_mail flyer brochure",
+            "ad": "advertisement commercial spot announcement promotion marketing",
+            "email": "email message correspondence communication electronic_mail",
+            "social media": "social_media post tweet status_update social_network"
+        }
+
+        for doc_type, context in document_types.items():
+            if doc_type in query.lower():
+                enhanced_query += " " + context
+
+        # Add sentiment context
+        sentiment_terms = {
+            "positive": "positive favorable supportive approving optimistic hopeful",
+            "negative": "negative critical opposing disapproving pessimistic unfavorable",
+            "neutral": "neutral objective impartial balanced unbiased factual"
+        }
+
+        for sentiment, context in sentiment_terms.items():
+            if sentiment in query.lower():
+                enhanced_query += " " + context
+
+        # Add campaign strategy context
+        strategy_terms = {
+            "attack": "attack criticism negative opposition contrast comparison",
+            "defense": "defense response rebuttal counterargument explanation justification",
+            "promotion": "promotion positive support endorsement advocacy recommendation",
+            "contrast": "contrast comparison difference distinction opposing alternative"
+        }
+
+        for strategy, context in strategy_terms.items():
+            if strategy in query.lower():
+                enhanced_query += " " + context
 
         # Log the enhancement for debugging
         if enhanced_query != query.lower():

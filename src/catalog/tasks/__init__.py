@@ -1,7 +1,6 @@
 # tasks/__init__.py
 
 from .celery_app import celery_app
-from .test import test_task
 from .embedding_tasks import generate_embeddings
 from .analysis_utils import check_minimum_analysis
 # Import the tasks
