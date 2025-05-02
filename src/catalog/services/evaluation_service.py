@@ -683,23 +683,23 @@ class EvaluationService:
             ).join(Document, DocumentScorecard.document_id == Document.id)\
                 .filter(Document.upload_date >= start_date).first()
 
-            # Calculate success rates
+            # Calculate success rates - FIXED CASE FUNCTION SYNTAX
             batch_success = db.session.query(
-                func.sum(case([(DocumentScorecard.batch1_success == True, 1)], else_=0)).label(
+                func.sum(case((DocumentScorecard.batch1_success == True, 1), else_=0)).label(
                     'batch1_success'),
-                func.sum(case([(DocumentScorecard.batch2_success == True, 1)], else_=0)).label(
+                func.sum(case((DocumentScorecard.batch2_success == True, 1), else_=0)).label(
                     'batch2_success'),
-                func.sum(case([(DocumentScorecard.batch3_success == True, 1)], else_=0)).label(
+                func.sum(case((DocumentScorecard.batch3_success == True, 1), else_=0)).label(
                     'batch3_success'),
                 func.count().label('total')
             ).join(Document, DocumentScorecard.document_id == Document.id)\
                 .filter(Document.upload_date >= start_date).first()
 
-            # Calculate review stats
+            # Calculate review stats - FIXED CASE FUNCTION SYNTAX
             review_stats = db.session.query(
-                func.sum(case([(DocumentScorecard.requires_review == True, 1)], else_=0)).label(
+                func.sum(case((DocumentScorecard.requires_review == True, 1), else_=0)).label(
                     'requires_review'),
-                func.sum(case([(DocumentScorecard.reviewed == True, 1)], else_=0)).label(
+                func.sum(case((DocumentScorecard.reviewed == True, 1), else_=0)).label(
                     'completed_review'),
                 func.count().label('total')
             ).join(Document, DocumentScorecard.document_id == Document.id)\

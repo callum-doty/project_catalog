@@ -3,12 +3,155 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content="{{ csrf_token() }}" />
     <title>Document Processing Admin</title>
-    <!-- Add your CSS here -->
+    <style>
+      /* Simple layout styles */
+      body {
+        background-color: #f8f9fa;
+      }
+      #root {
+        margin-top: 0;
+      }
+      .loading-indicator {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        width: 100%;
+      }
+      .console-log-container {
+        position: fixed;
+        bottom: 0;
+        right: 0;
+        width: 400px;
+        max-height: 200px;
+        overflow-y: auto;
+        background-color: rgba(0, 0, 0, 0.8);
+        color: #00ff00;
+        font-family: monospace;
+        font-size: 12px;
+        padding: 10px;
+        border-top-left-radius: 5px;
+        z-index: 9999;
+        display: none; /* Hidden by default */
+      }
+    </style>
   </head>
   <body>
+    <!-- Loading indicator -->
+    <div id="loadingApp" class="loading-indicator">
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+      <span class="ms-2">Loading admin dashboard...</span>
+    </div>
+
+    <!-- App container -->
     <div id="root"></div>
-    <!-- Add your bundled JS here -->
-    <script src="{{ url_for('static', filename='js/admin-bundle.js') }}"></script>
+
+    <!-- Debug console (hidden by default, can be shown with Ctrl+Shift+D) -->
+    <div id="console-log-container" class="console-log-container">
+      <div
+        style="
+          display: flex;
+          justify-content: space-between;
+          margin-bottom: 5px;
+        "
+      >
+        <strong>Debug Console</strong>
+        <button
+          id="clearConsole"
+          style="background: none; border: none; color: white; cursor: pointer"
+        >
+          Clear
+        </button>
+      </div>
+      <pre id="console-log"></pre>
+    </div>
+
+    <script>
+      // Debug console logic
+      (function () {
+        const consoleContainer = document.getElementById(
+          "console-log-container"
+        );
+        const logElement = document.getElementById("console-log");
+        const clearButton = document.getElementById("clearConsole");
+
+        // Toggle console with keyboard shortcut (Ctrl+Shift+D)
+        document.addEventListener("keydown", function (e) {
+          if (e.ctrlKey && e.shiftKey && e.key === "D") {
+            consoleContainer.style.display =
+              consoleContainer.style.display === "none" ? "block" : "none";
+          }
+        });
+
+        // Clear console button
+        clearButton.addEventListener("click", function () {
+          logElement.textContent = "";
+        });
+
+        // Override console methods
+        const oldLog = console.log;
+        const oldError = console.error;
+        const oldWarn = console.warn;
+
+        console.log = function (...args) {
+          oldLog.apply(console, args);
+          logToElement("LOG", args);
+        };
+
+        console.error = function (...args) {
+          oldError.apply(console, args);
+          logToElement("ERROR", args);
+        };
+
+        console.warn = function (...args) {
+          oldWarn.apply(console, args);
+          logToElement("WARN", args);
+        };
+
+        function logToElement(type, args) {
+          if (!logElement) return;
+
+          const timestamp = new Date().toISOString().slice(11, 19);
+          const prefix = type === "LOG" ? ">" : type === "ERROR" ? "!" : "?";
+
+          const message = args
+            .map((arg) => {
+              try {
+                return typeof arg === "object"
+                  ? JSON.stringify(arg)
+                  : String(arg);
+              } catch (e) {
+                return String(arg);
+              }
+            })
+            .join(" ");
+
+          const line = `[${timestamp}] ${prefix} ${message}\n`;
+          logElement.textContent += line;
+
+          // Auto-scroll to bottom
+          logElement.scrollTop = logElement.scrollHeight;
+        }
+      })();
+    </script>
+
+    <!-- Load the admin dashboard script -->
+    <script src="{{ url_for('static', filename='js/admin-dashboard.js') }}"></script>
+
+    <script>
+      // Hide loading indicator when the app is loaded
+      window.addEventListener("load", function () {
+        setTimeout(function () {
+          const loadingIndicator = document.getElementById("loadingApp");
+          if (loadingIndicator) {
+            loadingIndicator.style.display = "none";
+          }
+        }, 1000); // Small delay to ensure everything is rendered
+      });
+    </script>
   </body>
 </html>

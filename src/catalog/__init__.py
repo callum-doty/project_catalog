@@ -55,6 +55,7 @@ def create_app(test_config=None):
     csrf.init_app(app)
 
     # Register blueprints
+    # Register blueprints
     with app.app_context():
         try:
             # Import blueprints here to avoid circular imports
@@ -63,6 +64,16 @@ def create_app(test_config=None):
 
             app.register_blueprint(main_routes)
             app.register_blueprint(search_routes, url_prefix='/search')
+
+            # Register admin blueprint
+            try:
+                from src.catalog.web.admin_routes import admin_bp
+                app.register_blueprint(admin_bp)
+                app.logger.info("Registered admin blueprint")
+            except Exception as e:
+                app.logger.warning(
+                    f"Could not register admin blueprint: {str(e)}")
+
         except Exception as e:
             app.logger.error(f"Error registering blueprints: {str(e)}")
             raise

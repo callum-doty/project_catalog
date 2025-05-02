@@ -2,7 +2,6 @@
 
 from flask import Blueprint, render_template, request, session, flash, redirect, url_for, jsonify, current_app
 from werkzeug.utils import secure_filename
-
 import os
 import src.catalog
 from sqlalchemy.orm import joinedload
@@ -31,7 +30,6 @@ from src.catalog.utils import search_with_timeout, document_has_column, monitor_
 from src.catalog.utils.query_builders import get_failed_documents_query
 from src.catalog.utils.query_builders import get_document_statistics, build_document_with_relationships_query, apply_sorting, get_stuck_documents_query
 from src.catalog.constants import CACHE_TIMEOUTS
-from src.catalog.services.evaluation_service import EvaluationService
 
 
 main_routes = Blueprint('main_routes', __name__)
@@ -791,16 +789,25 @@ def view_document(filename):
 def get_quality_metrics():
     """API endpoint to get quality metrics for document processing"""
     try:
+        # Create evaluation service instance
+        from src.catalog.services.evaluation_service import EvaluationService
+
         evaluation_service = EvaluationService()
+
+        # Get days parameter with default value
         days = request.args.get('days', default=30, type=int)
+
+        # Get metrics data
         metrics = evaluation_service.get_quality_metrics(days=days)
+
         return jsonify({
-            'status': 'success',
-            'metrics': metrics
+            'success': True,
+            'data': metrics
         })
     except Exception as e:
-        current_app.logger.error(f"Error getting quality metrics: {str(e)}")
+        current_app.logger.error(
+            f"Error getting quality metrics: {str(e)}", exc_info=True)
         return jsonify({
-            'status': 'error',
-            'message': str(e)
+            'success': False,
+            'error': str(e)
         }), 500
