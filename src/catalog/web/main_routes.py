@@ -340,8 +340,6 @@ def get_document_hierarchical_keywords(document_id):
             f"Error getting hierarchical keywords: {str(e)}")
         return []
 
-# Generate taxonomy facets for sidebar
-
 
 @cache.memoize(timeout=300)
 def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None):
@@ -807,6 +805,54 @@ def get_quality_metrics():
     except Exception as e:
         current_app.logger.error(
             f"Error getting quality metrics: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@main_routes.route('/api/generate-scorecards', methods=['POST'])
+def generate_missing_scorecards():
+    """Generate evaluation scorecards for all documents that don't have them"""
+    try:
+        # Get documents with COMPLETED status
+        from src.catalog.models import Document, DocumentScorecard
+        from src.catalog.services.evaluation_service import EvaluationService
+
+        # Find documents that don't have scorecards
+        documents_without_scorecards = db.session.query(Document).filter(
+            Document.status == 'COMPLETED',
+            ~Document.id.in_(db.session.query(DocumentScorecard.document_id))
+        ).all()
+
+        current_app.logger.info(
+            f"Found {len(documents_without_scorecards)} documents without scorecards")
+
+        # Create evaluation service
+        eval_service = EvaluationService()
+
+        # Create scorecards for each document
+        created_count = 0
+        for doc in documents_without_scorecards:
+            try:
+                # Evaluate each batch
+                batch1_success, _ = eval_service.evaluate_batch1(doc.id)
+                batch2_success, _ = eval_service.evaluate_batch2(doc.id)
+                batch3_success, _ = eval_service.evaluate_batch3(doc.id)
+
+                created_count += 1
+                current_app.logger.info(
+                    f"Created scorecard for document {doc.id}")
+            except Exception as e:
+                current_app.logger.error(
+                    f"Error creating scorecard for document {doc.id}: {str(e)}")
+
+        return jsonify({
+            'success': True,
+            'message': f"Created {created_count} scorecards out of {len(documents_without_scorecards)} documents"
+        })
+    except Exception as e:
+        current_app.logger.error(f"Error generating scorecards: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)

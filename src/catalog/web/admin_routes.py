@@ -5,6 +5,8 @@ from src.catalog import db
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 import logging
+from flask import current_app
+
 
 logger = logging.getLogger(__name__)
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
@@ -13,22 +15,26 @@ admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 @admin_bp.route('/quality-metrics', methods=['GET'])
 def get_quality_metrics():
     """Get quality metrics for the admin dashboard"""
+
     try:
         # Get time range from query params (default to last 30 days)
         days = int(request.args.get('days', 30))
+        current_app.logger.info(f"Getting metrics for last {days} days")
 
         # Initialize evaluation service
         eval_service = EvaluationService()
 
         # Get quality metrics
         metrics = eval_service.get_quality_metrics(days=days)
+        current_app.logger.info(f"Retrieved metrics: {metrics}")
 
         return jsonify({
             'success': True,
             'data': metrics
         })
     except Exception as e:
-        logger.error(f"Error getting quality metrics: {str(e)}")
+        current_app.logger.error(
+            f"Error getting quality metrics: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
             'error': str(e)

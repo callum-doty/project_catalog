@@ -654,9 +654,16 @@ class EvaluationService:
             from datetime import datetime, timedelta
             from sqlalchemy import func, case
 
+            # Log SQLAlchemy version
+            import sqlalchemy
+            self.logger.info(f"SQLAlchemy version: {sqlalchemy.__version__}")
+
             # Calculate the date range
             end_date = datetime.utcnow()
             start_date = end_date - timedelta(days=days)
+
+            self.logger.info(
+                f"Calculating metrics from {start_date} to {end_date}")
 
             # Get basic counts
             total_documents = db.session.query(Document)\
@@ -683,53 +690,74 @@ class EvaluationService:
             ).join(Document, DocumentScorecard.document_id == Document.id)\
                 .filter(Document.upload_date >= start_date).first()
 
-            # Calculate success rates - FIXED CASE FUNCTION SYNTAX
             batch_success = db.session.query(
-                func.sum(case((DocumentScorecard.batch1_success == True, 1), else_=0)).label(
-                    'batch1_success'),
-                func.sum(case((DocumentScorecard.batch2_success == True, 1), else_=0)).label(
-                    'batch2_success'),
-                func.sum(case((DocumentScorecard.batch3_success == True, 1), else_=0)).label(
-                    'batch3_success'),
+                func.sum(
+                    case((DocumentScorecard.batch1_success == True, 1), else_=0)
+                ).label('batch1_success'),
+                func.sum(
+                    case((DocumentScorecard.batch2_success == True, 1), else_=0)
+                ).label('batch2_success'),
+                func.sum(
+                    case((DocumentScorecard.batch3_success == True, 1), else_=0)
+                ).label('batch3_success'),
                 func.count().label('total')
             ).join(Document, DocumentScorecard.document_id == Document.id)\
                 .filter(Document.upload_date >= start_date).first()
 
-            # Calculate review stats - FIXED CASE FUNCTION SYNTAX
+            # Calculate review stats - SQLAlchemy 2.0 COMPATIBLE SYNTAX
             review_stats = db.session.query(
-                func.sum(case((DocumentScorecard.requires_review == True, 1), else_=0)).label(
-                    'requires_review'),
-                func.sum(case((DocumentScorecard.reviewed == True, 1), else_=0)).label(
-                    'completed_review'),
+                func.sum(
+                    case((DocumentScorecard.requires_review == True, 1), else_=0)
+                ).label('requires_review'),
+                func.sum(
+                    case((DocumentScorecard.reviewed == True, 1), else_=0)
+                ).label('completed_review'),
                 func.count().label('total')
             ).join(Document, DocumentScorecard.document_id == Document.id)\
                 .filter(Document.upload_date >= start_date).first()
 
-            # Prepare result
+            # At the beginning of get_quality_metrics method
+            scorecard_count = db.session.query(DocumentScorecard).count()
+            self.logger.info(
+                f"Total DocumentScorecard records in database: {scorecard_count}")
+
+            # Also log some sample scorecards if they exist
+            if scorecard_count > 0:
+                sample_scorecards = db.session.query(
+                    DocumentScorecard).limit(3).all()
+                for idx, sc in enumerate(sample_scorecards):
+                    self.logger.info(
+                        f"Sample scorecard {idx+1}: Document ID: {sc.document_id}, Total Score: {sc.total_score}")
+
             metrics = {
                 "period_days": days,
-                "total_documents": total_documents,
-                "total_scored": total_scored,
+                "total_documents": total_documents or 0,
+                "total_scored": total_scored or 0,
                 "average_scores": {
-                    "total": round(avg_scores.avg_total or 0, 1),
-                    "metadata": round(avg_scores.avg_metadata or 0, 1),
-                    "text_extraction": round(avg_scores.avg_text or 0, 1),
-                    "classification": round(avg_scores.avg_classification or 0, 1),
-                    "entity": round(avg_scores.avg_entity or 0, 1),
-                    "design": round(avg_scores.avg_design or 0, 1),
-                    "keyword": round(avg_scores.avg_keyword or 0, 1),
-                    "communication": round(avg_scores.avg_communication or 0, 1)
+                    "total": round(getattr(avg_scores, 'avg_total', 0) or 0, 1),
+                    "metadata": round(getattr(avg_scores, 'avg_metadata', 0) or 0, 1),
+                    "text_extraction": round(getattr(avg_scores, 'avg_text', 0) or 0, 1),
+                    "classification": round(getattr(avg_scores, 'avg_classification', 0) or 0, 1),
+                    "entity": round(getattr(avg_scores, 'avg_entity', 0) or 0, 1),
+                    "design": round(getattr(avg_scores, 'avg_design', 0) or 0, 1),
+                    "keyword": round(getattr(avg_scores, 'avg_keyword', 0) or 0, 1),
+                    "communication": round(getattr(avg_scores, 'avg_communication', 0) or 0, 1)
                 },
                 "success_rates": {
-                    "batch1": round((batch_success.batch1_success or 0) / (batch_success.total or 1) * 100, 1),
-                    "batch2": round((batch_success.batch2_success or 0) / (batch_success.total or 1) * 100, 1),
-                    "batch3": round((batch_success.batch3_success or 0) / (batch_success.total or 1) * 100, 1)
+                    "batch1": round((getattr(batch_success, 'batch1_success', 0) or 0) /
+                                    (getattr(batch_success, 'total', 1) or 1) * 100, 1),
+                    "batch2": round((getattr(batch_success, 'batch2_success', 0) or 0) /
+                                    (getattr(batch_success, 'total', 1) or 1) * 100, 1),
+                    "batch3": round((getattr(batch_success, 'batch3_success', 0) or 0) /
+                                    (getattr(batch_success, 'total', 1) or 1) * 100, 1)
                 },
                 "review_metrics": {
-                    "requires_review_count": review_stats.requires_review or 0,
-                    "requires_review_percent": round((review_stats.requires_review or 0) / (review_stats.total or 1) * 100, 1),
-                    "completed_review_count": review_stats.completed_review or 0,
-                    "review_completion_rate": round((review_stats.completed_review or 0) / (review_stats.requires_review or 1) * 100, 1) if review_stats.requires_review else 0
+                    "requires_review_count": getattr(review_stats, 'requires_review', 0) or 0,
+                    "requires_review_percent": round((getattr(review_stats, 'requires_review', 0) or 0) /
+                                                     (getattr(review_stats, 'total', 1) or 1) * 100, 1),
+                    "completed_review_count": getattr(review_stats, 'completed_review', 0) or 0,
+                    "review_completion_rate": round((getattr(review_stats, 'completed_review', 0) or 0) /
+                                                    (getattr(review_stats, 'requires_review', 1) or 1) * 100, 1)
                 }
             }
 
@@ -737,8 +765,19 @@ class EvaluationService:
 
         except Exception as e:
             self.logger.error(f"Error getting quality metrics: {str(e)}")
+            # Return complete structure with default values
             return {
-                "error": str(e),
                 "period_days": days,
-                "total_documents": 0
+                "total_documents": 0,
+                "total_scored": 0,
+                "average_scores": {
+                    "total": 0, "metadata": 0, "text_extraction": 0,
+                    "classification": 0, "entity": 0, "design": 0,
+                    "keyword": 0, "communication": 0
+                },
+                "success_rates": {"batch1": 0, "batch2": 0, "batch3": 0},
+                "review_metrics": {
+                    "requires_review_count": 0, "requires_review_percent": 0,
+                    "completed_review_count": 0, "review_completion_rate": 0
+                }
             }

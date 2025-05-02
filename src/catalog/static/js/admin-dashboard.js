@@ -62,14 +62,16 @@ const loadScript = (src) => {
       const fetchMetrics = async () => {
         try {
           setLoading(true);
+          console.log("Fetching metrics with timeRange:", timeRange);
           const response = await fetch(`/api/admin/quality-metrics?days=${timeRange}`);
           
+          console.log("Response status:", response.status);
           if (!response.ok) {
             throw new Error(`Server returned ${response.status}: ${response.statusText}`);
           }
           
           const data = await response.json();
-          console.log('Metrics data:', data);
+          console.log("Raw API response:", data);
           
           if (data.success === false) {
             throw new Error(data.error || 'Unknown error');
@@ -77,6 +79,9 @@ const loadScript = (src) => {
           
           setMetrics(data.data);
           setError(null);
+          
+          // Log the data structure
+          console.log("Metrics data structure:", JSON.stringify(data.data, null, 2));
           
           // After data is loaded, create charts
           setTimeout(() => {
@@ -600,3 +605,17 @@ const loadScript = (src) => {
     
     console.log('Admin dashboard initialized successfully');
   }
+
+  function safeGet(obj, path, defaultValue = 0) {
+    const keys = path.split('.');
+    let result = obj;
+    
+    for (const key of keys) {
+        if (result === null || result === undefined || typeof result !== 'object') {
+            return defaultValue;
+        }
+        result = result[key];
+    }
+    
+    return result === null || result === undefined ? defaultValue : result;
+}
