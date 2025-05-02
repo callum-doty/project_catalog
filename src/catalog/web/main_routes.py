@@ -31,6 +31,7 @@ from src.catalog.utils import search_with_timeout, document_has_column, monitor_
 from src.catalog.utils.query_builders import get_failed_documents_query
 from src.catalog.utils.query_builders import get_document_statistics, build_document_with_relationships_query, apply_sorting, get_stuck_documents_query
 from src.catalog.constants import CACHE_TIMEOUTS
+from src.catalog.services.evaluation_service import EvaluationService
 
 
 main_routes = Blueprint('main_routes', __name__)
@@ -784,3 +785,22 @@ def view_document(filename):
         current_app.logger.error(f"Error fetching document: {str(e)}")
         flash(f'Error viewing document: {str(e)}', 'error')
         return redirect(url_for('main_routes.search_documents'))
+
+
+@main_routes.route('/api/admin/quality-metrics')
+def get_quality_metrics():
+    """API endpoint to get quality metrics for document processing"""
+    try:
+        evaluation_service = EvaluationService()
+        days = request.args.get('days', default=30, type=int)
+        metrics = evaluation_service.get_quality_metrics(days=days)
+        return jsonify({
+            'status': 'success',
+            'metrics': metrics
+        })
+    except Exception as e:
+        current_app.logger.error(f"Error getting quality metrics: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
