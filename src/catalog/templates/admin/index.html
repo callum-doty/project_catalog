@@ -5,19 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content="{{ csrf_token() }}" />
     <title>Document Processing Admin</title>
+
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
     <style>
-      /* Simple layout styles */
       body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
         background-color: #f8f9fa;
+        line-height: 1.5;
+        padding: 20px;
       }
       #root {
-        margin-top: 0;
+        margin-top: 20px;
       }
       .loading-indicator {
         display: flex;
         justify-content: center;
         align-items: center;
-        height: 100vh;
+        height: 200px;
         width: 100%;
       }
       .console-log-container {
@@ -36,9 +44,99 @@
         z-index: 9999;
         display: none; /* Hidden by default */
       }
+      .card {
+        background-color: white;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
+        padding: 20px;
+        margin-bottom: 20px;
+      }
+      .spinner-border {
+        display: inline-block;
+        width: 2rem;
+        height: 2rem;
+        vertical-align: text-bottom;
+        border: 0.25em solid currentColor;
+        border-right-color: transparent;
+        border-radius: 50%;
+        animation: spinner-border 0.75s linear infinite;
+      }
+      @keyframes spinner-border {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      .text-center {
+        text-align: center;
+      }
+      .alert {
+        padding: 15px;
+        margin-bottom: 20px;
+        border: 1px solid transparent;
+        border-radius: 4px;
+      }
+      .alert-info {
+        background-color: #d1ecf1;
+        border-color: #bee5eb;
+        color: #0c5460;
+      }
+      .alert-danger {
+        background-color: #f8d7da;
+        border-color: #f5c6cb;
+        color: #721c24;
+      }
     </style>
   </head>
   <body>
+    <h1>Document Processing Admin Dashboard</h1>
+
+    <div class="card">
+      <div id="fallbackContent">
+        <div class="alert alert-info">
+          <h3>Admin Dashboard</h3>
+          <p>
+            If you're seeing this message, the JavaScript-based admin dashboard
+            failed to load.
+          </p>
+          <p>Check the browser console for error messages by pressing F12.</p>
+        </div>
+
+        <div class="text-center">
+          <h4>Document Stats</h4>
+          <p>Total Documents: <span id="docCount">Loading...</span></p>
+        </div>
+
+        <script>
+          // Minimal script to fetch document count
+          fetch("/api/admin/quality-metrics")
+            .then((response) => response.json())
+            .then((data) => {
+              const docCount = document.getElementById("docCount");
+              if (data && data.data && data.data.total_documents) {
+                docCount.textContent = data.data.total_documents;
+              } else {
+                docCount.textContent = "Error loading data";
+              }
+            })
+            .catch((error) => {
+              const docCount = document.getElementById("docCount");
+              docCount.textContent = "Error: " + error.message;
+            });
+        </script>
+      </div>
+    </div>
+
     <!-- Loading indicator -->
     <div id="loadingApp" class="loading-indicator">
       <div class="spinner-border text-primary" role="status">
@@ -105,6 +203,8 @@
         console.error = function (...args) {
           oldError.apply(console, args);
           logToElement("ERROR", args);
+          // Show the console automatically on errors
+          consoleContainer.style.display = "block";
         };
 
         console.warn = function (...args) {
@@ -147,10 +247,20 @@
       window.addEventListener("load", function () {
         setTimeout(function () {
           const loadingIndicator = document.getElementById("loadingApp");
+          const fallbackContent = document.getElementById("fallbackContent");
+
           if (loadingIndicator) {
             loadingIndicator.style.display = "none";
           }
-        }, 1000); // Small delay to ensure everything is rendered
+
+          // If root contains children, hide the fallback content
+          const root = document.getElementById("root");
+          if (root && root.children.length > 0) {
+            if (fallbackContent) {
+              fallbackContent.style.display = "none";
+            }
+          }
+        }, 2000); // Longer delay to ensure everything is rendered
       });
     </script>
   </body>

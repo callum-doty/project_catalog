@@ -49,7 +49,9 @@ class DocumentScorecard(db.Model):
     updated_date = db.Column(db.DateTime(timezone=True),
                              default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    document = db.relationship('Document')
+    # Fixed the conflicting relationship with overlaps parameter
+    document = db.relationship(
+        'Document', overlaps="document_parent,scorecard", backref="document_scorecards")
 
     def __repr__(self):
         return f"<DocumentScorecard document_id={self.document_id} score={self.total_score}>"
