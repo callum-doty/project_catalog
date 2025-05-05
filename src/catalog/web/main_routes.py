@@ -464,8 +464,13 @@ def recovery_dashboard():
 def recover_pending():
     """Display pending documents that might be stuck for recovery"""
     try:
-        # Use query builder for stuck documents (pending for more than 1 hour)
+        # Use query builder for stuck documents (processing for more than 1 hour)
+        # We'll explicitly look for PROCESSING status
         stuck_documents = get_stuck_documents_query(hours=1).all()
+
+        # Log the number of stuck documents
+        current_app.logger.info(
+            f"Found {len(stuck_documents)} stuck documents")
 
         # Prepare data for template
         documents_data = []
@@ -475,13 +480,22 @@ def recover_pending():
             time_since_upload = datetime.utcnow() - doc.upload_date
             hours_pending = time_since_upload.total_seconds() / 3600
 
-            # Get preview
+            # Get preview with better error handling
             preview = None
             try:
                 preview = preview_service.get_preview(doc.filename)
             except Exception as e:
                 current_app.logger.error(
                     f"Preview generation failed for {doc.filename}: {str(e)}")
+
+            # Check file presence in storage
+            file_exists = False
+            try:
+                storage.client.stat_object(storage.bucket, doc.filename)
+                file_exists = True
+            except Exception:
+                current_app.logger.warning(
+                    f"File {doc.filename} not found in storage")
 
             documents_data.append({
                 'id': doc.id,
@@ -490,8 +504,13 @@ def recover_pending():
                 'file_size': f"{(doc.file_size/1024):.2f} KB",
                 'preview': preview,
                 'status': doc.status,
-                'hours_pending': round(hours_pending, 1)
+                'hours_pending': round(hours_pending, 1),
+                'file_exists': file_exists
             })
+
+        # Log if no documents found
+        if not documents_data:
+            current_app.logger.info("No stuck documents found to recover")
 
         return render_template('pages/recover_pending.html', documents=documents_data)
 
@@ -504,29 +523,61 @@ def recover_pending():
 
 @main_routes.route('/api/recover-document/<int:document_id>', methods=['POST'])
 def recover_document(document_id):
-    """Trigger reprocessing of a failed document"""
+    """Trigger reprocessing of a stuck document"""
     try:
         document = Document.query.get_or_404(document_id)
+        current_app.logger.info(
+            f"Attempting to recover document {document_id}: {document.filename}")
 
         if document.status not in ['FAILED', 'PENDING', 'PROCESSING']:
+            current_app.logger.warning(
+                f"Document {document_id} not in recoverable state: {document.status}")
             return jsonify({
                 'status': 'error',
                 'message': f'Document is not in a recoverable state: {document.status}'
             }), 400
 
+        # Verify file exists in storage
+        file_exists = False
+        try:
+            storage.client.stat_object(storage.bucket, document.filename)
+            file_exists = True
+        except Exception as e:
+            current_app.logger.error(f"File not found in storage: {str(e)}")
+
+        if not file_exists:
+            current_app.logger.error(
+                f"Cannot recover document {document_id}: file {document.filename} not found in storage")
+            return jsonify({
+                'status': 'error',
+                'message': f'Document file not found in storage'
+            }), 400
+
         # Import recovery task
         from src.catalog.tasks.recovery_tasks import reprocess_document
 
-        # Reset document status
+        # Reset document status to PENDING
         document.status = 'PENDING'
         db.session.commit()
+        current_app.logger.info(
+            f"Reset document {document_id} status to PENDING")
 
         # Get the file from MinIO storage
         minio_path = f"{storage.bucket}/{document.filename}"
 
         # Queue reprocessing task
-        task = reprocess_document.delay(
-            document.filename, minio_path, document.id)
+        try:
+            task = reprocess_document.delay(
+                document.filename, minio_path, document.id)
+            current_app.logger.info(
+                f"Queued document {document_id} for reprocessing with task ID: {task.id}")
+        except Exception as task_error:
+            current_app.logger.error(
+                f"Failed to queue reprocessing task: {str(task_error)}", exc_info=True)
+            # Reset status to original if task queueing fails
+            document.status = 'PROCESSING'
+            db.session.commit()
+            raise task_error
 
         return jsonify({
             'status': 'success',
@@ -535,7 +586,8 @@ def recover_document(document_id):
         })
 
     except Exception as e:
-        current_app.logger.error(f"Error recovering document: {str(e)}")
+        current_app.logger.error(
+            f"Error recovering document: {str(e)}", exc_info=True)
         return jsonify({
             'status': 'error',
             'message': str(e)
@@ -548,11 +600,17 @@ def recovery_status(document_id):
     try:
         document = Document.query.get_or_404(document_id)
 
+        # Add more detailed information
+        processing_time = None
+        if document.status == 'COMPLETED':
+            processing_time = document.processing_time
+
         return jsonify({
             'status': 'success',
             'document_status': document.status,
             'id': document.id,
-            'filename': document.filename
+            'filename': document.filename,
+            'processing_time': processing_time
         })
 
     except Exception as e:

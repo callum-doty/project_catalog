@@ -277,7 +277,7 @@ def get_failed_documents_query():
 
 def get_stuck_documents_query(hours=1):
     """
-    Get query for documents stuck in PENDING or PROCESSING state
+    Get query for documents stuck in PROCESSING state
 
     Args:
         hours: Minimum hours since upload to consider a document stuck
@@ -286,12 +286,13 @@ def get_stuck_documents_query(hours=1):
         SQLAlchemy query for stuck documents
     """
     from datetime import datetime, timedelta
+    from src.catalog.constants import DOCUMENT_STATUSES
 
     time_threshold = datetime.utcnow() - timedelta(hours=hours)
 
+    # We're specifically looking for PROCESSING documents
     return Document.query.filter(
-        Document.status.in_([DOCUMENT_STATUSES['PENDING'],
-                            DOCUMENT_STATUSES['PROCESSING']]),
+        Document.status == DOCUMENT_STATUSES['PROCESSING'],
         Document.upload_date < time_threshold
     ).order_by(Document.upload_date.desc())
 

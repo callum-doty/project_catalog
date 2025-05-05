@@ -129,7 +129,88 @@ def invalidate_document_cache(document_id):
             f"Error invalidating cache for document {document_id}: {str(e)}")
 
 
-@celery_app.task(bind=True, base=DocumentProcessorTask, name='process_document')
+def process_batch1(llm_service, filename, document_id):
+    """Process the first batch of document analysis (metadata and text extraction)"""
+    logger.info(f"Processing batch 1 for document {document_id}: {filename}")
+
+    try:
+        # Process metadata component with clear error handling
+        metadata_response = llm_service.analyze_document_modular(
+            filename, components=["metadata"]
+        )
+
+        if metadata_response and "document_analysis" in metadata_response:
+            logger.info(
+                "Metadata component processed successfully, storing results...")
+            success = store_partial_analysis(document_id, metadata_response)
+            if success:
+                logger.info("✅ Metadata component stored successfully")
+            else:
+                logger.error("❌ Failed to store metadata component")
+        else:
+            logger.error(
+                "❌ Metadata component processing failed or returned empty results")
+
+        # Process text component with clear error handling
+        text_response = llm_service.analyze_document_modular(
+            filename, components=["text"]
+        )
+
+        if text_response and "extracted_text" in text_response:
+            logger.info(
+                "Text component processed successfully, storing results...")
+            success = store_partial_analysis(document_id, text_response)
+            if success:
+                logger.info("✅ Text component stored successfully")
+                # Return True if at least the text component was stored
+                return True
+            else:
+                logger.error("❌ Failed to store text component")
+        else:
+            logger.error(
+                "❌ Text component processing failed or returned empty results")
+
+        # Verify if any core components were stored successfully
+        from src.catalog.tasks.analysis_utils import check_minimum_analysis
+        has_core = check_minimum_analysis(document_id)
+
+        return has_core
+
+    except Exception as e:
+        logger.error(f"Error in batch 1 processing: {str(e)}")
+        return False
+
+
+def process_batch2(llm_service, filename, document_id):
+    """Process the second batch of document analysis (classification, entities, design, keywords)"""
+    logger.info(f"Processing batch 2 for document {document_id}: {filename}")
+
+    try:
+        # Process all batch 2 components together
+        batch2_response = llm_service.analyze_document_modular(
+            filename, components=["classification",
+                                  "entities", "design", "keywords"]
+        )
+
+        if batch2_response:
+            success = store_partial_analysis(document_id, batch2_response)
+            if success:
+                logger.info("✅ Batch 2 components stored successfully")
+                return True
+            else:
+                logger.error("❌ Failed to store batch 2 components")
+        else:
+            logger.error(
+                "❌ Batch 2 components processing failed or returned empty results")
+
+        return False
+
+    except Exception as e:
+        logger.error(f"Error in batch 2 processing: {str(e)}")
+        return False
+
+
+@celery_app.task(bind=True, name='process_document')
 def process_document(self, filename, minio_path, document_id):
     """Process document through the pipeline using truly modular analysis"""
     logger.info(f"=== STARTING DOCUMENT PROCESSING ===")
@@ -143,107 +224,41 @@ def process_document(self, filename, minio_path, document_id):
     app = create_app()
 
     with app.app_context():
-        doc = Document.query.get(document_id)
-        if not doc:
-            logger.error(f"Document with ID {document_id} not found")
-            return False
-
-        doc.status = DOCUMENT_STATUSES['PROCESSING']
-        db.session.commit()
-        logger.info(f"Updated document status to PROCESSING")
-
         try:
-            logger.info(f"Starting analysis for document: {filename}")
+            doc = Document.query.get(document_id)
+            if not doc:
+                logger.error(f"Document with ID {document_id} not found")
+                return False
+
+            doc.status = DOCUMENT_STATUSES['PROCESSING']
+            db.session.commit()
+            logger.info(f"Updated document status to PROCESSING")
 
             # Initialize LLM service
             from src.catalog.services.llm_service import LLMService
             llm_service = LLMService()
 
-            # Process in batches with different priorities
-            success_count = 0
+            # Process in batches with clear error handling
+            batch1_success = process_batch1(llm_service, filename, document_id)
+            batch2_success = process_batch2(llm_service, filename, document_id)
 
-            # Batch 1: Core components (highest priority) - MUST SUCCEED
-            logger.info(f"Processing core components (metadata, text)")
-            try:
-                # Process metadata component separately first with clear error handling
-                metadata_response = llm_service.analyze_document_modular(
-                    filename, components=["metadata"]
-                )
-                if metadata_response and "document_analysis" in metadata_response:
-                    logger.info(
-                        "Metadata component processed successfully, storing results...")
-                    success = store_partial_analysis(
-                        document_id, metadata_response)
-                    if success:
-                        logger.info("✅ Metadata component stored successfully")
-                    else:
-                        logger.error("❌ Failed to store metadata component")
-                else:
-                    logger.error(
-                        "❌ Metadata component processing failed or returned empty results")
-
-                # Process text component separately with clear error handling
-                text_response = llm_service.analyze_document_modular(
-                    filename, components=["text"]
-                )
-                if text_response and "extracted_text" in text_response:
-                    logger.info(
-                        "Text component processed successfully, storing results...")
-                    success = store_partial_analysis(
-                        document_id, text_response)
-                    if success:
-                        logger.info("✅ Text component stored successfully")
-                        success_count += 1
-                    else:
-                        logger.error("❌ Failed to store text component")
-                else:
-                    logger.error(
-                        "❌ Text component processing failed or returned empty results")
-
-                # Verify that the core components were stored correctly
-                has_core = check_minimum_analysis(document_id)
-                if has_core:
-                    logger.info("✅ Core components confirmed in database")
-                else:
-                    logger.error("❌ Core components not found in database")
-
-            except Exception as e:
-                logger.error(f"Error in core component analysis: {str(e)}")
-                logger.error(traceback.format_exc())
-
-            # Batch 2: Add keywords component (along with other components in this batch)
-            logger.info(
-                f"Processing batch 2 (classification, entities, design, keywords)")
-            try:
-                batch2_response = llm_service.analyze_document_modular(
-                    filename, components=["classification",
-                                          "entities", "design", "keywords"]
-                )
-                if batch2_response:
-                    success = store_partial_analysis(
-                        document_id, batch2_response)
-                    if success:
-                        logger.info("✅ Batch 2 components stored successfully")
-                        success_count += 1
-                    else:
-                        logger.error("❌ Failed to store batch 2 components")
-            except Exception as e:
-                logger.error(f"Error in batch 2 component analysis: {str(e)}")
-                logger.error(traceback.format_exc())
-
-            # Final check for minimum required components
+            # Check if we have minimum required analysis
             has_minimum_analysis = check_minimum_analysis(document_id)
-            logger.info(
-                f"Final minimum analysis check: {has_minimum_analysis}")
+            logger.info(f"Minimum analysis check: {has_minimum_analysis}")
 
             if has_minimum_analysis:
-                # Update status and commit
+                # Update status to COMPLETED
                 doc.status = DOCUMENT_STATUSES['COMPLETED']
                 db.session.commit()
-                logger.info(
-                    f"Analysis completed successfully with {success_count} component groups")
+                logger.info(f"Document processing completed successfully")
 
-                # [Queue other tasks like embeddings and preview...]
+                # Queue preview generation
+                try:
+                    from src.catalog.tasks.preview_tasks import generate_preview
+                    generate_preview.delay(filename, document_id)
+                    logger.info(f"Queued preview generation for {filename}")
+                except Exception as e:
+                    logger.error(f"Failed to queue preview: {str(e)}")
 
                 return True
             else:
@@ -251,14 +266,26 @@ def process_document(self, filename, minio_path, document_id):
                 doc.status = DOCUMENT_STATUSES['FAILED']
                 db.session.commit()
                 logger.error(f"Failed to obtain minimum required analysis")
-                raise Exception("Failed to obtain minimum required analysis")
+                return False
 
         except Exception as e:
             logger.error(
                 f"Document processing failed: {str(e)}", exc_info=True)
-            doc.status = DOCUMENT_STATUSES['FAILED']
-            db.session.commit()
-            raise
+
+            try:
+                # Update status to FAILED (not COMPLETED) when an exception occurs
+                doc = Document.query.get(document_id)
+                if doc and doc.status != DOCUMENT_STATUSES['FAILED']:
+                    # Change to FAILED
+                    doc.status = DOCUMENT_STATUSES['FAILED']
+                    db.session.commit()
+                    logger.info(
+                        f"✅ Updated document {document_id} status to FAILED")
+            except Exception as status_e:
+                logger.error(
+                    f"❌ Failed to update document status to FAILED: {str(status_e)}")
+
+            return False
 
 
 # Fix for store_partial_analysis() function in src/catalog/tasks/document_tasks.py

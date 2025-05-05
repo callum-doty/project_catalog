@@ -186,39 +186,49 @@ def review_document(document_id):
 def generate_missing_scorecards():
     """Generate evaluation scorecards for all documents that don't have them"""
     try:
-        # Import evaluation service
+        # Find documents with COMPLETED status that don't have scorecards
+        from src.catalog.models import Document, DocumentScorecard
+        from sqlalchemy import and_, not_, exists
         from src.catalog.services.evaluation_service import EvaluationService
 
-        # Find documents without scorecards - Using EXISTS subquery to avoid ambiguity
-        documents_query = db.session.query(Document).filter(
+        # Use a clearer subquery approach that's less prone to SQLAlchemy issues
+        subquery = db.session.query(DocumentScorecard.document_id).subquery()
+
+        documents_without_scorecards = Document.query.filter(
             Document.status == 'COMPLETED',
-            ~Document.id.in_(db.session.query(DocumentScorecard.document_id))
-        )
+            not_(Document.id.in_(subquery))
+        ).all()
 
-        # Count total documents
-        total_count = documents_query.count()
-
-        # Limit to 100 documents per request to avoid timeouts
-        documents = documents_query.limit(100).all()
+        current_app.logger.info(
+            f"Found {len(documents_without_scorecards)} documents without scorecards")
 
         # Create evaluation service
         eval_service = EvaluationService()
 
-        # Initialize counters
+        # Create scorecards for each document
         created_count = 0
         error_count = 0
 
-        # Process each document
-        for doc in documents:
+        for doc in documents_without_scorecards:
             try:
-                # Evaluate batch 1
-                batch1_success, _ = eval_service.evaluate_batch1(doc.id)
+                # Evaluate each batch
+                current_app.logger.info(
+                    f"Processing document {doc.id}: {doc.filename}")
 
-                # Evaluate batch 2
-                batch2_success, _ = eval_service.evaluate_batch2(doc.id)
+                batch1_success, batch1_message = eval_service.evaluate_batch1(
+                    doc.id)
+                current_app.logger.info(
+                    f"Batch 1 result: {batch1_success} - {batch1_message}")
 
-                # Evaluate batch 3
-                batch3_success, _ = eval_service.evaluate_batch3(doc.id)
+                batch2_success, batch2_message = eval_service.evaluate_batch2(
+                    doc.id)
+                current_app.logger.info(
+                    f"Batch 2 result: {batch2_success} - {batch2_message}")
+
+                batch3_success, batch3_message = eval_service.evaluate_batch3(
+                    doc.id)
+                current_app.logger.info(
+                    f"Batch 3 result: {batch3_success} - {batch3_message}")
 
                 created_count += 1
                 current_app.logger.info(
@@ -228,14 +238,12 @@ def generate_missing_scorecards():
                     f"Error creating scorecard for document {doc.id}: {str(e)}")
                 error_count += 1
 
-        # Return summary
         return jsonify({
             'success': True,
-            'message': f"Created {created_count} scorecards with {error_count} errors. {total_count - created_count} documents remaining."
+            'message': f"Created {created_count} scorecards out of {len(documents_without_scorecards)} documents with {error_count} errors"
         })
     except Exception as e:
-        current_app.logger.error(
-            f"Error generating scorecards: {str(e)}", exc_info=True)
+        current_app.logger.error(f"Error generating scorecards: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
