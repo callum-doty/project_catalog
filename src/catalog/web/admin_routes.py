@@ -49,9 +49,9 @@ def get_review_queue():
         sort_by = request.args.get('sort_by', 'score')  # score or date
         sort_order = request.args.get('sort_order', 'asc')
 
-        # Build query to get documents requiring review
-        query = db.session.query(Document).join(
-            DocumentScorecard, Document.id == DocumentScorecard.document_id
+        # Build query to get documents requiring review - using select_from to fix ambiguity
+        query = db.session.query(Document).select_from(DocumentScorecard).join(
+            Document, DocumentScorecard.document_id == Document.id
         ).filter(
             DocumentScorecard.requires_review == True,
             DocumentScorecard.reviewed == False
@@ -189,7 +189,7 @@ def generate_missing_scorecards():
         # Import evaluation service
         from src.catalog.services.evaluation_service import EvaluationService
 
-        # Find documents without scorecards
+        # Find documents without scorecards - Using EXISTS subquery to avoid ambiguity
         documents_query = db.session.query(Document).filter(
             Document.status == 'COMPLETED',
             ~Document.id.in_(db.session.query(DocumentScorecard.document_id))

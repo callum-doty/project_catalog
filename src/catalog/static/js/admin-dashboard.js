@@ -1,4 +1,4 @@
-// Minimal admin dashboard with enhanced debugging
+// Admin dashboard with enhanced debugging and fixed number handling
 document.addEventListener('DOMContentLoaded', function() {
   console.log('Admin dashboard script loaded');
   
@@ -39,6 +39,22 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('manualFetchBtn').addEventListener('click', fetchDashboardData);
   document.getElementById('generateBtn').addEventListener('click', generateScorecards);
   
+  // Helper function to safely parse numeric values
+  function parseNumeric(value, defaultValue = 0) {
+    if (value === undefined || value === null) return defaultValue;
+    
+    // If it's already a number, return it
+    if (typeof value === 'number') return value;
+    
+    // Try to convert string to number
+    if (typeof value === 'string') {
+      const parsed = parseFloat(value);
+      return isNaN(parsed) ? defaultValue : parsed;
+    }
+    
+    return defaultValue;
+  }
+  
   // Main function to fetch dashboard data
   function fetchDashboardData() {
     updateStatus('Fetching data from API...', false);
@@ -67,28 +83,43 @@ document.addEventListener('DOMContentLoaded', function() {
         throw new Error(`API request failed with status ${response.status}`);
       }
       
-      return response.text(); // Get raw text first for debugging
+      return response.json();
     })
-    .then(rawText => {
-      console.log('Raw response text:', rawText);
+    .then(response => {
+      console.log('Parsed response:', response);
       
-      // Try parsing as JSON
-      try {
-        const response = JSON.parse(rawText);
-        console.log('Parsed response:', response);
-        
-        // Extract data from response
-        const data = response.data || response;
-        
-        // Display data
-        displayDashboard(data);
-        
-        updateStatus('Data loaded successfully!', false);
-        
-      } catch (parseError) {
-        console.error('Error parsing JSON:', parseError);
-        updateStatus(`Error parsing API response: ${parseError.message}. Raw response: ${rawText.substring(0, 100)}...`, true);
+      // Extract data from response
+      const data = response.data || response;
+      
+      // Convert string numbers to actual numbers throughout the data
+      if (data.average_scores) {
+        Object.keys(data.average_scores).forEach(key => {
+          data.average_scores[key] = parseNumeric(data.average_scores[key]);
+        });
       }
+      
+      if (data.component_scores) {
+        Object.keys(data.component_scores).forEach(key => {
+          data.component_scores[key] = parseNumeric(data.component_scores[key]);
+        });
+      }
+      
+      if (data.success_rates) {
+        Object.keys(data.success_rates).forEach(key => {
+          data.success_rates[key] = parseNumeric(data.success_rates[key]);
+        });
+      }
+      
+      if (data.review_metrics) {
+        Object.keys(data.review_metrics).forEach(key => {
+          data.review_metrics[key] = parseNumeric(data.review_metrics[key]);
+        });
+      }
+      
+      // Display data
+      displayDashboard(data);
+      
+      updateStatus('Data loaded successfully!', false);
     })
     .catch(error => {
       console.error('Error fetching dashboard data:', error);
@@ -119,7 +150,8 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="card">
               <div class="card-body text-center">
                 <h5 class="card-title">Average Score</h5>
-                <p class="display-4">${(data.average_scores && data.average_scores.total) ? data.average_scores.total.toFixed(1) : '0.0'}</p>
+                <p class="display-4">${typeof data.average_scores?.total === 'number' ? 
+                  data.average_scores.total.toFixed(1) : '0.0'}</p>
               </div>
             </div>
           </div>
@@ -128,7 +160,59 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="card">
               <div class="card-body text-center">
                 <h5 class="card-title">Documents for Review</h5>
-                <p class="display-4">${(data.review_metrics && data.review_metrics.requires_review_count) || 0}</p>
+                <p class="display-4">${data.review_metrics?.requires_review_count || 0}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Success Rates -->
+        <div class="row mt-4">
+          <div class="col-12">
+            <div class="card">
+              <div class="card-body">
+                <h5 class="card-title">Processing Success Rates</h5>
+                <div class="row text-center">
+                  <div class="col-md-4">
+                    <div class="p-3 bg-light rounded">
+                      <h6>Batch 1</h6>
+                      <div class="progress">
+                        <div class="progress-bar bg-success" role="progressbar" 
+                          style="width: ${data.success_rates?.batch1 || 0}%" 
+                          aria-valuenow="${data.success_rates?.batch1 || 0}" aria-valuemin="0" aria-valuemax="100">
+                          ${typeof data.success_rates?.batch1 === 'number' ? 
+                            data.success_rates.batch1.toFixed(1) : '0'}%
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="p-3 bg-light rounded">
+                      <h6>Batch 2</h6>
+                      <div class="progress">
+                        <div class="progress-bar bg-info" role="progressbar" 
+                          style="width: ${data.success_rates?.batch2 || 0}%" 
+                          aria-valuenow="${data.success_rates?.batch2 || 0}" aria-valuemin="0" aria-valuemax="100">
+                          ${typeof data.success_rates?.batch2 === 'number' ? 
+                            data.success_rates.batch2.toFixed(1) : '0'}%
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="p-3 bg-light rounded">
+                      <h6>Batch 3</h6>
+                      <div class="progress">
+                        <div class="progress-bar bg-primary" role="progressbar" 
+                          style="width: ${data.success_rates?.batch3 || 0}%" 
+                          aria-valuenow="${data.success_rates?.batch3 || 0}" aria-valuemin="0" aria-valuemax="100">
+                          ${typeof data.success_rates?.batch3 === 'number' ? 
+                            data.success_rates.batch3.toFixed(1) : '0'}%
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -140,13 +224,48 @@ document.addEventListener('DOMContentLoaded', function() {
             <h5 class="card-title">Dashboard Controls</h5>
             <button id="refreshBtn" class="btn btn-primary">Refresh Data</button>
             <button id="scorecardsBtn" class="btn btn-success ms-2">Generate Scorecards</button>
+            <div class="form-group mt-3">
+              <label for="timeRange">Time Range:</label>
+              <select id="timeRange" class="form-control" style="max-width: 200px">
+                <option value="7">Last 7 Days</option>
+                <option value="30" selected>Last 30 Days</option>
+                <option value="90">Last 90 Days</option>
+                <option value="365">Last Year</option>
+              </select>
+            </div>
           </div>
         </div>
         
-        <!-- API Data -->
+        <!-- Component Scores -->
         <div class="card mt-4">
           <div class="card-body">
-            <h5 class="card-title">API Data</h5>
+            <h5 class="card-title">Component Scores</h5>
+            <div class="row">
+              ${Object.entries(data.component_scores || {}).map(([key, value]) => `
+                <div class="col-md-3 mb-3">
+                  <div class="p-3 bg-light rounded">
+                    <h6>${key.charAt(0).toUpperCase() + key.slice(1)}</h6>
+                    <div class="progress">
+                      <div class="progress-bar" role="progressbar" 
+                        style="width: ${parseNumeric(value) / 0.2}%" 
+                        aria-valuenow="${parseNumeric(value)}" aria-valuemin="0" aria-valuemax="20">
+                        ${parseNumeric(value).toFixed(1)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+        
+        <!-- API Data (Debugging) -->
+        <div class="card mt-4">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">API Data</h5>
+            <button class="btn btn-sm btn-outline-secondary toggle-data">Show/Hide</button>
+          </div>
+          <div class="card-body api-data-container" style="display: none;">
             <pre class="bg-light p-3">${JSON.stringify(data, null, 2)}</pre>
           </div>
         </div>
@@ -159,6 +278,80 @@ document.addEventListener('DOMContentLoaded', function() {
     // Re-attach event handlers
     document.getElementById('refreshBtn').addEventListener('click', fetchDashboardData);
     document.getElementById('scorecardsBtn').addEventListener('click', generateScorecards);
+    
+    // Add time range handler
+    const timeRangeSelect = document.getElementById('timeRange');
+    timeRangeSelect.addEventListener('change', function() {
+      fetchDashboardDataWithDays(parseInt(this.value, 10));
+    });
+    
+    // Toggle API data visibility
+    document.querySelector('.toggle-data').addEventListener('click', function() {
+      const container = document.querySelector('.api-data-container');
+      container.style.display = container.style.display === 'none' ? 'block' : 'none';
+    });
+  }
+  
+  // Fetch with specific days parameter
+  function fetchDashboardDataWithDays(days) {
+    updateStatus(`Fetching data for last ${days} days...`, false);
+    
+    const apiUrl = `/api/admin/quality-metrics?days=${days}`;
+    console.log('Fetching from URL:', apiUrl);
+    
+    // Get CSRF token
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+    
+    fetch(apiUrl, {
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest',
+        'Accept': 'application/json',
+        'X-CSRFToken': csrfToken || ''
+      }
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`API request failed with status ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(response => {
+      const data = response.data || response;
+      
+      // Convert string numbers to actual numbers
+      if (data.average_scores) {
+        Object.keys(data.average_scores).forEach(key => {
+          data.average_scores[key] = parseNumeric(data.average_scores[key]);
+        });
+      }
+      
+      if (data.component_scores) {
+        Object.keys(data.component_scores).forEach(key => {
+          data.component_scores[key] = parseNumeric(data.component_scores[key]);
+        });
+      }
+      
+      if (data.success_rates) {
+        Object.keys(data.success_rates).forEach(key => {
+          data.success_rates[key] = parseNumeric(data.success_rates[key]);
+        });
+      }
+      
+      if (data.review_metrics) {
+        Object.keys(data.review_metrics).forEach(key => {
+          data.review_metrics[key] = parseNumeric(data.review_metrics[key]);
+        });
+      }
+      
+      // Display data
+      displayDashboard(data);
+      
+      updateStatus(`Data loaded for last ${days} days`, false);
+    })
+    .catch(error => {
+      console.error('Error fetching dashboard data:', error);
+      updateStatus(`Error fetching data: ${error.message}`, true);
+    });
   }
   
   // Function to generate scorecards

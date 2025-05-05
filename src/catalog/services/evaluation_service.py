@@ -2,7 +2,7 @@
 import logging
 import json
 from datetime import datetime, timedelta
-from sqlalchemy import func, case
+from sqlalchemy import func, case, select
 from src.catalog import db
 from src.catalog.models import Document, DocumentScorecard
 from src.catalog.models import LLMAnalysis, ExtractedText, DesignElement, Entity, Classification
@@ -14,7 +14,6 @@ class EvaluationService:
     """Service for evaluating and scoring document processing quality"""
 
     def __init__(self):
-        # Removed db.__version__ reference that was causing the error
         logger.info("Initializing EvaluationService")
 
     def get_quality_metrics(self, days=30):
@@ -31,6 +30,7 @@ class EvaluationService:
 
             # Get average scores (with safety checks for no documents)
             if total_docs > 0:
+                # Fixed query with explicit join
                 avg_scores = db.session.query(
                     func.avg(DocumentScorecard.metadata_score).label(
                         'metadata'),
@@ -44,7 +44,7 @@ class EvaluationService:
                     func.avg(DocumentScorecard.communication_score).label(
                         'communication'),
                     func.avg(DocumentScorecard.total_score).label('total')
-                ).join(
+                ).select_from(DocumentScorecard).join(
                     Document, DocumentScorecard.document_id == Document.id
                 ).filter(
                     Document.upload_date >= start_date
@@ -83,7 +83,7 @@ class EvaluationService:
 
             if total_docs > 0:
                 try:
-                    # Fixed case syntax - separate when clauses instead of list
+                    # Fixed query with explicit join and select_from
                     success_data = db.session.query(
                         func.sum(
                             case(
@@ -104,7 +104,7 @@ class EvaluationService:
                             )
                         ).label('batch3_success'),
                         func.count().label('total')
-                    ).join(
+                    ).select_from(DocumentScorecard).join(
                         Document, DocumentScorecard.document_id == Document.id
                     ).filter(
                         Document.upload_date >= start_date
@@ -119,11 +119,11 @@ class EvaluationService:
                 except Exception as e:
                     logger.error(f"Error calculating success rates: {str(e)}")
 
-            # Get documents requiring review
+            # Get documents requiring review - fixed with select_from
             try:
                 review_count = db.session.query(
                     func.count()
-                ).join(
+                ).select_from(DocumentScorecard).join(
                     Document, DocumentScorecard.document_id == Document.id
                 ).filter(
                     Document.upload_date >= start_date,
@@ -149,9 +149,10 @@ class EvaluationService:
                         low, high = map(int, score_range.replace(
                             'range_', '').split('_'))
 
+                        # Fixed query with select_from
                         count = db.session.query(
                             func.count()
-                        ).join(
+                        ).select_from(DocumentScorecard).join(
                             Document, DocumentScorecard.document_id == Document.id
                         ).filter(
                             Document.upload_date >= start_date,
@@ -303,6 +304,33 @@ class EvaluationService:
             logger.exception(f"Error evaluating Batch 1: {str(e)}")
             db.session.rollback()
             return False, f"Error: {str(e)}"
+
+    def mark_document_reviewed(self, document_id, reviewer_notes="", corrections_made=""):
+        """Mark a document as reviewed"""
+        try:
+            # Get scorecard
+            scorecard = DocumentScorecard.query.filter_by(
+                document_id=document_id).first()
+            if not scorecard:
+                logger.error(f"Scorecard for document {document_id} not found")
+                return False
+
+            # Update review fields
+            scorecard.reviewed = True
+            scorecard.review_date = datetime.utcnow()
+            scorecard.reviewer_notes = reviewer_notes
+            scorecard.corrections_made = corrections_made
+
+            # Save changes
+            db.session.commit()
+            logger.info(f"Document {document_id} marked as reviewed")
+
+            return True
+
+        except Exception as e:
+            logger.exception(f"Error marking document as reviewed: {str(e)}")
+            db.session.rollback()
+            return False
 
     def evaluate_batch2(self, document_id):
         """Evaluate Batch 2 components - classification, entity, design"""
@@ -460,7 +488,7 @@ class EvaluationService:
             keyword_flags = []
 
             # Check for LLM keywords
-            if llm_analysis and llm_analysis.keywords and len(llm_analysis.keywords) > 0:
+            if llm_analysis and hasattr(llm_analysis, 'keywords') and llm_analysis.keywords and len(llm_analysis.keywords) > 0:
                 # 5 points for having any keywords
                 keyword_score += 5
 
@@ -522,30 +550,3 @@ class EvaluationService:
             logger.exception(f"Error evaluating Batch 3: {str(e)}")
             db.session.rollback()
             return False, f"Error: {str(e)}"
-
-    def mark_document_reviewed(self, document_id, reviewer_notes="", corrections_made=""):
-        """Mark a document as reviewed"""
-        try:
-            # Get scorecard
-            scorecard = DocumentScorecard.query.filter_by(
-                document_id=document_id).first()
-            if not scorecard:
-                logger.error(f"Scorecard for document {document_id} not found")
-                return False
-
-            # Update review fields
-            scorecard.reviewed = True
-            scorecard.review_date = datetime.utcnow()
-            scorecard.reviewer_notes = reviewer_notes
-            scorecard.corrections_made = corrections_made
-
-            # Save changes
-            db.session.commit()
-            logger.info(f"Document {document_id} marked as reviewed")
-
-            return True
-
-        except Exception as e:
-            logger.exception(f"Error marking document as reviewed: {str(e)}")
-            db.session.rollback()
-            return False
