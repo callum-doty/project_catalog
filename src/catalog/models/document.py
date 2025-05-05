@@ -29,8 +29,6 @@ class Document(db.Model):
 
     scorecard = db.relationship(
         'DocumentScorecard', backref='document_parent', uselist=False, cascade="all, delete-orphan")
-
-    # Relationships
     llm_analysis = db.relationship(
         'LLMAnalysis', backref='document', lazy='joined', uselist=False)
     extracted_text = db.relationship(
@@ -65,7 +63,7 @@ class CommunicationFocus(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     document_id = db.Column(db.Integer, db.ForeignKey('documents.id'))
     primary_issue = db.Column(db.Text)
-    secondary_issues = db.Column(db.Text)  # JSON array stored as text
+    secondary_issues = db.Column(db.Text)
     messaging_strategy = db.Column(db.Text)
     created_date = db.Column(db.DateTime(
         timezone=True), default=datetime.utcnow)
@@ -81,7 +79,7 @@ class DesignElement(db.Model):
     geographic_location = db.Column(db.Text)
     target_audience = db.Column(db.Text)
     campaign_name = db.Column(db.Text)
-    visual_elements = db.Column(db.Text)  # JSON array stored as text
+    visual_elements = db.Column(db.Text)
     confidence = db.Column(db.BigInteger)
     created_date = db.Column(db.DateTime(timezone=True))
 
@@ -100,7 +98,6 @@ class LLMAnalysis(db.Model):
     analysis_date = db.Column(db.DateTime(timezone=True))
     model_version = db.Column(db.Text)
 
-    # Relationship with keywords
     keywords = db.relationship('LLMKeyword', backref='analysis', lazy='joined')
 
 

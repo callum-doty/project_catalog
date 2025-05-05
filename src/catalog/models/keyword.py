@@ -19,13 +19,11 @@ class KeywordTaxonomy(db.Model):
     created_date = db.Column(db.DateTime(
         timezone=True), default=datetime.utcnow)
 
-    # Self-referential relationship for hierarchy
     parent_id = db.Column(db.Integer, db.ForeignKey('keyword_taxonomy.id'))
     children = db.relationship('KeywordTaxonomy',
                                backref=db.backref('parent', remote_side=[id]),
                                cascade="all, delete-orphan")
 
-    # Relationship to synonyms
     synonyms = db.relationship('KeywordSynonym',
                                backref='taxonomy_term',
                                cascade="all, delete-orphan")
@@ -49,16 +47,14 @@ class KeywordTaxonomy(db.Model):
     @classmethod
     def find_matching_terms(cls, search_term):
         """Find taxonomy terms matching the search term or its synonyms"""
-        # Direct match on term
+
         direct_matches = cls.query.filter(
             cls.term.ilike(f"%{search_term}%")).all()
 
-        # Match on synonyms
         synonym_matches = cls.query.join(KeywordSynonym).filter(
             KeywordSynonym.synonym.ilike(f"%{search_term}%")
         ).all()
 
-        # Combine unique results
         all_matches = {
             term.id: term for term in direct_matches + synonym_matches}
         return list(all_matches.values())
@@ -67,11 +63,9 @@ class KeywordTaxonomy(db.Model):
         """Get all terms related to this one (parent, children, siblings)"""
         related = []
 
-        # Get parent if exists
         if self.parent:
             related.append(self.parent)
 
-        # Get siblings (other children of parent)
         if self.parent:
             siblings = KeywordTaxonomy.query.filter(
                 KeywordTaxonomy.parent_id == self.parent_id,
@@ -79,7 +73,6 @@ class KeywordTaxonomy(db.Model):
             ).all()
             related.extend(siblings)
 
-        # Get children
         related.extend(self.children)
 
         return related
@@ -110,9 +103,8 @@ class DocumentKeyword(db.Model):
     relevance_score = db.Column(db.Float)
     extraction_date = db.Column(db.DateTime(
         timezone=True), default=datetime.utcnow)
-    display_order = db.Column(db.Integer, default=0)  # New field for ordering
+    display_order = db.Column(db.Integer, default=0)
 
-    # Relationships
     document = db.relationship('Document', backref='document_keywords')
     taxonomy_term = db.relationship('KeywordTaxonomy')
 
@@ -128,13 +120,12 @@ class SearchFeedback(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     search_query = db.Column(db.Text, nullable=False)
     document_id = db.Column(db.Integer, db.ForeignKey('documents.id'))
-    # 'relevant', 'not_relevant', 'missing'
+
     feedback_type = db.Column(db.String(50))
     feedback_date = db.Column(db.DateTime(
         timezone=True), default=datetime.utcnow)
     user_comment = db.Column(db.Text)
 
-    # Relationship to document
     document = db.relationship('Document')
 
     def __repr__(self):

@@ -17,8 +17,6 @@ class EmbeddingsService:
             logger.warning(
                 "OPENAI_API_KEY environment variable is not set. Vector search will not work.")
 
-        # Update to use the newer model
-        # Updated to the newer OpenAI embeddings model
         self.model = "text-embedding-3-small"
         self.embedding_dim = 1536  # Dimensions for this model
 
@@ -41,7 +39,7 @@ class EmbeddingsService:
                     json={
                         "input": text,
                         "model": self.model,
-                        "encoding_format": "float"  # Request float format
+                        "encoding_format": "float"
                     },
                     timeout=30.0
                 )

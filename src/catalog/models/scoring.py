@@ -23,40 +23,33 @@ class DocumentScorecard(db.Model):
     keyword_score = db.Column(db.Integer, default=0)  # Out of 15
     communication_score = db.Column(db.Integer, default=0)  # Out of 10
 
-    # Overall quality indicators
     total_score = db.Column(db.Integer, default=0)  # Out of 100
     requires_review = db.Column(db.Boolean, default=False)
     review_reason = db.Column(db.Text)
 
-    # Processing success indicators
     batch1_success = db.Column(db.Boolean, default=False)
     batch2_success = db.Column(db.Boolean, default=False)
     batch3_success = db.Column(db.Boolean, default=False)
 
-    # Component-specific flags
-    metadata_flags = db.Column(db.Text)  # JSON string of specific issues
-    text_flags = db.Column(db.Text)  # JSON string of specific issues
-    classification_flags = db.Column(db.Text)  # JSON string of specific issues
-    entity_flags = db.Column(db.Text)  # JSON string of specific issues
-    design_flags = db.Column(db.Text)  # JSON string of specific issues
-    keyword_flags = db.Column(db.Text)  # JSON string of specific issues
-    communication_flags = db.Column(db.Text)  # JSON string of specific issues
+    metadata_flags = db.Column(db.Text)
+    text_flags = db.Column(db.Text)
+    classification_flags = db.Column(db.Text)
+    entity_flags = db.Column(db.Text)
+    design_flags = db.Column(db.Text)
+    keyword_flags = db.Column(db.Text)
+    communication_flags = db.Column(db.Text)
 
-    # Review and feedback
     reviewed = db.Column(db.Boolean, default=False)
     review_date = db.Column(db.DateTime(timezone=True))
     reviewer_notes = db.Column(db.Text)
-    corrections_made = db.Column(db.Text)  # JSON string of corrections
+    corrections_made = db.Column(db.Text)
 
-    # Timestamps
     created_date = db.Column(db.DateTime(
         timezone=True), default=datetime.utcnow)
     updated_date = db.Column(db.DateTime(timezone=True),
                              default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationship to document - REMOVE THE BACKREF HERE
-    # We'll just use the relationship defined in Document class
-    document = db.relationship('Document')  # No backref parameter
+    document = db.relationship('Document')
 
     def __repr__(self):
         return f"<DocumentScorecard document_id={self.document_id} score={self.total_score}>"
@@ -73,7 +66,6 @@ class DocumentScorecard(db.Model):
             self.communication_score
         )
 
-        # Set review flag if score is below threshold
         if self.total_score < 70:
             self.requires_review = True
             self.review_reason = "Total score below threshold (70)"

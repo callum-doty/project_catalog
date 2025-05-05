@@ -15,27 +15,24 @@ logger = logging.getLogger(__name__)
 
 class DropboxService:
     def __init__(self):
-        # Get access token with fallback
+
         self.access_token = os.getenv('DROPBOX_ACCESS_TOKEN')
         if not self.access_token:
             logger.error("DROPBOX_ACCESS_TOKEN not set")
             raise ValueError(
                 "DROPBOX_ACCESS_TOKEN environment variable is not set")
 
-        # Get folder path with fallback
         self.folder_path = os.getenv('DROPBOX_FOLDER_PATH', '')
         if not self.folder_path:
             logger.warning("DROPBOX_FOLDER_PATH not set, using root folder")
             self.folder_path = ""
 
-        # Normalize folder path
         if self.folder_path and not self.folder_path.startswith('/'):
             self.folder_path = f"/{self.folder_path}"
 
         logger.info(
             f"Initializing Dropbox with folder path: {self.folder_path}")
 
-        # Initialize with retry logic
         max_retries = 3
         retry_count = 0
         last_error = None
@@ -46,23 +43,22 @@ class DropboxService:
                     self.access_token,
                     timeout=30
                 )
-                # Test auth immediately
+
                 self.dbx.users_get_current_account()
                 logger.info("Successfully connected to Dropbox")
                 return
             except AuthError as e:
-                # Auth errors mean retrying won't help
+
                 logger.error(f"Dropbox authentication failed: {str(e)}")
                 raise
             except Exception as e:
                 last_error = e
                 retry_count += 1
-                wait_time = 2 ** retry_count  # Exponential backoff
+                wait_time = 2 ** retry_count
                 logger.warning(
                     f"Dropbox initialization attempt {retry_count} failed: {str(e)}. Retrying in {wait_time}s...")
                 time.sleep(wait_time)
 
-        # If we reached here, all retries failed
         logger.error(
             f"Failed to initialize Dropbox after {max_retries} attempts: {str(last_error)}")
         raise last_error
@@ -72,11 +68,9 @@ class DropboxService:
         try:
             account = self.dbx.users_get_current_account()
 
-            # Test folder access
             try:
                 folder_result = self.dbx.files_list_folder(self.folder_path)
 
-                # Check if folder exists but is empty
                 if not folder_result.entries:
                     logger.warning(
                         f"Folder exists but is empty: {self.folder_path}")
@@ -117,7 +111,7 @@ class DropboxService:
     def list_new_files(self):
         """List files in Dropbox folder that haven't been processed"""
         try:
-            # Get list of already processed files
+
             processed_files = {sync.dropbox_file_id
                                for sync in DropboxSync.query.all()}
 
@@ -126,7 +120,6 @@ class DropboxService:
 
             new_files = []
 
-            # Handle retry logic for the initial list_folder call
             max_retries = 3
             retry_count = 0
             result = None
@@ -152,7 +145,6 @@ class DropboxService:
                 logger.error("Failed to list folder after multiple attempts")
                 return []
 
-            # Process the results
             for entry in result.entries:
                 if isinstance(entry, dropbox.files.FileMetadata):
                     logger.info(f"Found file: {entry.name} (ID: {entry.id})")
@@ -165,7 +157,6 @@ class DropboxService:
                             logger.info(
                                 f"Skipping {entry.name} - unsupported file type")
 
-            # Handle pagination with retry logic
             while result.has_more:
                 retry_count = 0
                 next_result = None
@@ -192,7 +183,6 @@ class DropboxService:
 
                 result = next_result
 
-                # Process additional results
                 for entry in result.entries:
                     if isinstance(entry, dropbox.files.FileMetadata):
                         logger.info(
@@ -218,7 +208,7 @@ class DropboxService:
         """Process a single file from Dropbox"""
         temp_path = None
         try:
-            # Check if file was already processed
+
             existing_sync = DropboxSync.query.filter_by(
                 dropbox_file_id=file_metadata.id
             ).first()
@@ -229,11 +219,9 @@ class DropboxService:
 
             logger.info(f"Starting to process file: {file_metadata.name}")
 
-            # Create a temporary file
             with tempfile.NamedTemporaryFile(delete=False) as temp:
                 temp_path = temp.name
 
-            # Download file from Dropbox with retry logic
             max_retries = 3
             success = False
 
@@ -242,7 +230,6 @@ class DropboxService:
                     self.dbx.files_download_to_file(
                         temp_path, file_metadata.path_display)
 
-                    # Verify download was successful
                     if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
                         logger.info(
                             f"Successfully downloaded file to {temp_path} (Size: {os.path.getsize(temp_path)} bytes)")
@@ -254,7 +241,7 @@ class DropboxService:
                 except RateLimitError:
                     if attempt == max_retries - 1:
                         raise
-                    wait_time = 2 ** attempt  # Exponential backoff
+                    wait_time = 2 ** attempt
                     logger.warning(f"Rate limit hit, waiting {wait_time}s...")
                     time.sleep(wait_time)
                 except Exception as e:
@@ -268,13 +255,11 @@ class DropboxService:
                 raise Exception(
                     f"Failed to download file after {max_retries} attempts")
 
-            # Upload to MinIO
             from catalog.services.storage_service import MinIOStorage
             storage = MinIOStorage()
             minio_path = storage.upload_file(temp_path, file_metadata.name)
             logger.info(f"Uploaded to MinIO: {minio_path}")
 
-            # Create document record
             document = Document(
                 filename=file_metadata.name,
                 upload_date=datetime.utcnow(),
@@ -285,7 +270,6 @@ class DropboxService:
             db.session.add(document)
             db.session.flush()
 
-            # Create sync record
             sync_record = DropboxSync(
                 document_id=document.id,
                 dropbox_file_id=file_metadata.id,
@@ -305,7 +289,7 @@ class DropboxService:
             db.session.rollback()
             raise
         finally:
-            # Clean up temp file
+
             if temp_path and os.path.exists(temp_path):
                 os.remove(temp_path)
                 logger.debug(f"Cleaned up temporary file: {temp_path}")
@@ -313,16 +297,14 @@ class DropboxService:
     def get_sync_status(self):
         """Get information about recent syncs"""
         try:
-            # Get most recent sync
+
             last_sync = DropboxSync.query.order_by(
                 DropboxSync.sync_date.desc()).first()
 
-            # Get count of files synced in last 24 hours
             yesterday = datetime.utcnow() - timedelta(days=1)
             recent_syncs = DropboxSync.query.filter(
                 DropboxSync.sync_date >= yesterday).count()
 
-            # Test connection status
             connection_status = self.test_connection()
 
             return {

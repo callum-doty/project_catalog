@@ -1,6 +1,6 @@
 
 
-from src.catalog.extensions import db
+from src.catalog import db
 from src.catalog.models import KeywordTaxonomy, KeywordSynonym
 from src.catalog import create_app
 import os
@@ -8,11 +8,8 @@ import sys
 import logging
 import datetime
 
-# Add the parent directory to the path so we can import app modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-
-# Initialize base taxonomy data
 BASE_TAXONOMY = {
     "Policy Issues & Topics": {
         "Economy & Taxes": ["Taxes", "Inflation", "Jobs", "Wages", "Budget", "Deficit", "Trade"],
