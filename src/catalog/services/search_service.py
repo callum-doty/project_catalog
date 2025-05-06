@@ -1,4 +1,3 @@
-
 import logging
 import time
 from typing import List, Dict, Any, Optional, Set, Union, Tuple
@@ -698,17 +697,9 @@ class SearchService:
 
     def _format_documents_for_display(self, documents, all_keywords):
         """
-        Format documents for display in search results
-
-        Args:
-            documents: List of document objects
-            all_keywords: Dictionary mapping document IDs to keywords
-
-        Returns:
-            List of formatted document dictionaries
+        Format documents for display with all necessary data
         """
         formatted_docs = []
-
         for doc in documents:
             try:
                 # Get preview if possible
@@ -719,7 +710,7 @@ class SearchService:
                     self.logger.error(
                         f"Preview generation failed for {doc.filename}: {str(e)}")
 
-                # Format the document data
+                # Format document data
                 document_data = {
                     'id': doc.id,
                     'filename': doc.filename,
@@ -732,15 +723,6 @@ class SearchService:
                     'document_type': doc.llm_analysis.campaign_type if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
                     'election_year': doc.llm_analysis.election_year if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
                     'document_tone': doc.llm_analysis.document_tone if hasattr(doc, 'llm_analysis') and doc.llm_analysis else '',
-
-                    # Legacy keywords from LLM Analysis
-                    'keywords': [
-                        {
-                            'text': kw.keyword,
-                            'category': kw.category
-                        } for kw in (doc.llm_analysis.keywords if hasattr(doc, 'llm_analysis') and doc.llm_analysis and hasattr(doc.llm_analysis, 'keywords') else [])
-                        if hasattr(kw, 'keyword')
-                    ],
 
                     # Entity data
                     'client': doc.entity.client_name if hasattr(doc, 'entity') and doc.entity else '',
@@ -756,8 +738,15 @@ class SearchService:
                     # Extract text
                     'main_message': doc.extracted_text.main_message if hasattr(doc, 'extracted_text') and doc.extracted_text else '',
 
-                    # Hierarchical keywords - get from all_keywords dictionary
-                    'hierarchical_keywords': all_keywords.get(doc.id, [])
+                    # Hierarchical keywords - format LLMKeywords
+                    'hierarchical_keywords': [
+                        {
+                            'term': kw.keyword,
+                            'primary_category': kw.category,
+                            'subcategory': '',  # LLMKeyword doesn't have subcategory
+                            'relevance_score': kw.relevance_score / 100 if kw.relevance_score else 0
+                        } for kw in (doc.llm_analysis.keywords if hasattr(doc, 'llm_analysis') and doc.llm_analysis and hasattr(doc.llm_analysis, 'keywords') else [])
+                    ]
                 }
 
                 # Log the hierarchical keywords for debugging
@@ -843,7 +832,7 @@ class SearchService:
             'next_page': page + 1 if page < pages else None
         }
 
-        # Add these methods to the SearchService class
+    # Add these methods to the SearchService class
 
     def get_taxonomy_suggestions(self, query):
         """

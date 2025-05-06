@@ -1,4 +1,3 @@
-
 import os
 import time
 import json
@@ -6,7 +5,7 @@ from celery import Task
 from .celery_app import celery_app
 from .task_base import DocumentProcessor
 from .celery_app import celery_app, logger
-from src.catalog.models import Document, LLMAnalysis, LLMKeyword, Classification, DesignElement, ExtractedText, DropboxSync, Entity, CommunicationFocus
+from src.catalog.models import Document, LLMAnalysis, LLMKeyword, Classification, DesignElement, ExtractedText, DropboxSync, Entity, CommunicationFocus, KeywordTaxonomy
 from datetime import datetime, timedelta
 from src.catalog import db, cache
 from src.catalog.services.preview_service import PreviewService
@@ -16,6 +15,7 @@ import logging
 import traceback
 from src.catalog.constants import DOCUMENT_STATUSES
 from src.catalog.tasks.analysis_utils import check_minimum_analysis
+from src.catalog.services.llm_parser import LLMResponseParser
 
 
 search_service = SearchService()
@@ -247,26 +247,58 @@ def process_document(self, filename, minio_path, document_id):
             logger.info(f"Minimum analysis check: {has_minimum_analysis}")
 
             if has_minimum_analysis:
-                # Update status to COMPLETED
-                doc.status = DOCUMENT_STATUSES['COMPLETED']
-                db.session.commit()
-                logger.info(f"Document processing completed successfully")
-
-                # Queue preview generation
                 try:
-                    from src.catalog.tasks.preview_tasks import generate_preview
-                    generate_preview.delay(filename, document_id)
-                    logger.info(f"Queued preview generation for {filename}")
-                except Exception as e:
-                    logger.error(f"Failed to queue preview: {str(e)}")
+                    # Update status to COMPLETED
+                    # Re-fetch to ensure fresh state
+                    doc = Document.query.get(document_id)
+                    if doc:
+                        doc.status = DOCUMENT_STATUSES['COMPLETED']
+                        db.session.commit()
 
-                return True
+                        # Verify the status was updated
+                        db.session.refresh(doc)
+                        if doc.status == DOCUMENT_STATUSES['COMPLETED']:
+                            logger.info(
+                                f"Document processing completed successfully")
+                        else:
+                            logger.error(
+                                f"Failed to update document status to COMPLETED")
+                            return False
+                    else:
+                        logger.error(
+                            f"Document {document_id} not found when updating status")
+                        return False
+
+                    # Queue preview generation
+                    try:
+                        from src.catalog.tasks.preview_tasks import generate_preview
+                        generate_preview.delay(filename, document_id)
+                        logger.info(
+                            f"Queued preview generation for {filename}")
+                    except Exception as e:
+                        logger.error(f"Failed to queue preview: {str(e)}")
+
+                    return True
+                except Exception as status_e:
+                    logger.error(
+                        f"Error updating document status to COMPLETED: {str(status_e)}")
+                    db.session.rollback()
+                    return False
             else:
                 # Mark as failed if we don't have minimum analysis
-                doc.status = DOCUMENT_STATUSES['FAILED']
-                db.session.commit()
-                logger.error(f"Failed to obtain minimum required analysis")
-                return False
+                try:
+                    doc = Document.query.get(document_id)
+                    if doc:
+                        doc.status = DOCUMENT_STATUSES['FAILED']
+                        db.session.commit()
+                        logger.error(
+                            f"Failed to obtain minimum required analysis")
+                    return False
+                except Exception as e:
+                    logger.error(
+                        f"Error updating document status to FAILED: {str(e)}")
+                    db.session.rollback()
+                    return False
 
         except Exception as e:
             logger.error(
@@ -292,271 +324,177 @@ def process_document(self, filename, minio_path, document_id):
 
 def store_partial_analysis(document_id: int, response: dict):
     """Store partial analysis results in database"""
-    from src.catalog.services.llm_parser import LLMResponseParser
-
-    logger.info(f"Starting store_partial_analysis for document {document_id}")
-    logger.info(f"Response keys: {list(response.keys())}")
-
-    if not response:
-        logger.warning(f"Empty response for document {document_id}")
-        return False
-
     try:
-        # Store document analysis (metadata) if present
-        if "document_analysis" in response:
+        # Process each component in the response
+        for component, data in response.items():
             try:
-                logger.info(
-                    f"Processing document_analysis for document {document_id}")
-
-                # Use static method directly without creating an instance
-                llm_analysis_data = LLMResponseParser.parse_llm_analysis(
-                    response)  # Pass the complete response, not a modified one
-
-                # Print the data to be stored
-                logger.info(f"Analysis data to save: {llm_analysis_data}")
-
-                # Check if record exists
-                llm_analysis = LLMAnalysis.query.filter_by(
-                    document_id=document_id).first()
-
-                if llm_analysis:
-                    # Update existing record
-                    for key, value in llm_analysis_data.items():
-                        setattr(llm_analysis, key, value)
-                    logger.info(
-                        f"Updated existing LLM analysis for document {document_id}")
-                else:
-                    # Create new record
+                if component == "document_analysis":
+                    # Store LLM analysis
+                    analysis_data = LLMResponseParser.parse_llm_analysis(
+                        response)
                     llm_analysis = LLMAnalysis(
                         document_id=document_id,
-                        **llm_analysis_data
+                        **analysis_data
                     )
                     db.session.add(llm_analysis)
-                    logger.info(
-                        f"Created new LLM analysis for document {document_id}")
-
-                # Commit immediately for this critical component
-                db.session.commit()
-                logger.info(f"Successfully stored document analysis")
-
-                # Verify the record was saved
-                verification = LLMAnalysis.query.filter_by(
-                    document_id=document_id).first()
-                if verification is not None:
+                    db.session.commit()
+                    logger.info("Successfully stored document analysis")
                     logger.info("Verified LLM Analysis was saved correctly")
-                else:
-                    logger.error(
-                        "LLM Analysis failed to save to database despite successful commit!")
 
-            except Exception as e:
-                logger.error(f"Error storing document analysis: {str(e)}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                db.session.rollback()
+                elif component == "extracted_text":
+                    # Store extracted text
+                    text_data = LLMResponseParser.parse_extracted_text(
+                        response)
+                    extracted_text = ExtractedText(
+                        document_id=document_id,
+                        **text_data
+                    )
+                    db.session.add(extracted_text)
+                    db.session.commit()
+                    logger.info("Successfully stored extracted text data")
+                    logger.info("Verified Extracted Text was saved correctly")
 
-        # Store classification if present
-        if "classification" in response:
-            try:
-                # Use static method directly
-                classification_data = LLMResponseParser.parse_classification(
-                    response)  # Pass the complete response
-
-                # Check if record exists
-                classification = Classification.query.filter_by(
-                    document_id=document_id).first()
-
-                if classification:
-                    # Update existing record
-                    for key, value in classification_data.items():
-                        setattr(classification, key, value)
-                else:
-                    # Create new record
+                elif component == "classification":
+                    # Store classification
+                    classification_data = LLMResponseParser.parse_classification(
+                        response)
                     classification = Classification(
                         document_id=document_id,
                         **classification_data
                     )
                     db.session.add(classification)
+                    db.session.commit()
+                    logger.info("Successfully stored classification data")
 
-                # Commit immediately after this component
-                db.session.commit()
-                logger.info(f"Successfully stored classification data")
-            except Exception as e:
-                logger.error(f"Error storing classification: {str(e)}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                db.session.rollback()
-
-        # Store extracted text if present
-        if "extracted_text" in response:
-            try:
-                # Use static method directly
-                extracted_text_data = LLMResponseParser.parse_extracted_text(
-                    response)  # Pass the complete response
-
-                # Check if record exists
-                extracted_text = ExtractedText.query.filter_by(
-                    document_id=document_id).first()
-
-                if extracted_text:
-                    # Update existing record
-                    for key, value in extracted_text_data.items():
-                        setattr(extracted_text, key, value)
-                else:
-                    # Create new record
-                    extracted_text = ExtractedText(
-                        document_id=document_id,
-                        **extracted_text_data
-                    )
-                    db.session.add(extracted_text)
-
-                # Commit immediately after this component
-                db.session.commit()
-                logger.info(f"Successfully stored extracted text data")
-
-                # Verify the record was saved
-                if ExtractedText.query.filter_by(document_id=document_id).first() is not None:
-                    logger.info("Verified Extracted Text was saved correctly")
-                else:
-                    logger.warning(
-                        "Extracted Text failed to save to database!")
-
-            except Exception as e:
-                logger.error(f"Error storing extracted text: {str(e)}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                db.session.rollback()
-
-        # Store design elements if present
-        if "design_elements" in response:
-            try:
-                # Use static method directly
-                design_data = LLMResponseParser.parse_design_elements(
-                    response)  # Pass the complete response
-
-                # Check if record exists
-                design = DesignElement.query.filter_by(
-                    document_id=document_id).first()
-
-                if design:
-                    # Update existing record
-                    for key, value in design_data.items():
-                        setattr(design, key, value)
-                else:
-                    # Create new record
+                elif component == "design_elements":
+                    # Store design elements
+                    design_data = LLMResponseParser.parse_design_elements(
+                        response)
                     design = DesignElement(
                         document_id=document_id,
                         **design_data
                     )
                     db.session.add(design)
+                    db.session.commit()
+                    logger.info("Successfully stored design element data")
 
-                db.session.commit()
-                logger.info(f"Successfully stored design element data")
-            except Exception as e:
-                logger.error(f"Error storing design elements: {str(e)}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                db.session.rollback()
-
-        # Store entity information if present
-        if "entities" in response:
-            try:
-                # Use static method directly
-                entity_data = LLMResponseParser.parse_entity_info(
-                    response)  # Pass the complete response
-
-                # Check if record exists
-                entity = Entity.query.filter_by(
-                    document_id=document_id).first()
-
-                if entity:
-                    # Update existing record
-                    for key, value in entity_data.items():
-                        setattr(entity, key, value)
-                else:
-                    # Create new record
+                elif component == "entities":
+                    # Store entity information
+                    entity_data = LLMResponseParser.parse_entity_info(data)
                     entity = Entity(
                         document_id=document_id,
                         **entity_data
                     )
                     db.session.add(entity)
+                    db.session.commit()
+                    logger.info("Successfully stored entity information")
 
-                db.session.commit()
-                logger.info(f"Successfully stored entity information")
-            except Exception as e:
-                logger.error(f"Error storing entity information: {str(e)}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                db.session.rollback()
+                elif component == "hierarchical_keywords":
+                    try:
+                        # First get or create LLMAnalysis for this document
+                        llm_analysis = LLMAnalysis.query.filter_by(
+                            document_id=document_id).first()
+                        if not llm_analysis:
+                            logger.info(
+                                f"Creating new LLMAnalysis for document {document_id}")
+                            llm_analysis = LLMAnalysis(
+                                document_id=document_id,
+                                analysis_date=datetime.utcnow(),
+                                model_version="claude-3-opus-20240229"
+                            )
+                            db.session.add(llm_analysis)
+                            db.session.flush()  # Get the ID
+                            logger.info(
+                                f"Created new LLMAnalysis with ID {llm_analysis.id}")
+                        else:
+                            logger.info(
+                                f"Found existing LLMAnalysis with ID {llm_analysis.id}")
 
-        # Store communication focus if present
-        if "communication_focus" in response:
-            try:
-                # Use static method directly
-                focus_data = LLMResponseParser.parse_communication_focus(
-                    response)  # Pass the complete response
+                        # Wrap the data in a dictionary with the expected key
+                        wrapped_data = {'hierarchical_keywords': data}
 
-                # Check if record exists
-                focus = CommunicationFocus.query.filter_by(
-                    document_id=document_id).first()
-
-                if focus:
-                    # Update existing record
-                    for key, value in focus_data.items():
-                        setattr(focus, key, value)
-                else:
-                    # Create new record
-                    focus = CommunicationFocus(
-                        document_id=document_id,
-                        **focus_data
-                    )
-                    db.session.add(focus)
-
-                db.session.commit()
-                logger.info(f"Successfully stored communication focus data")
-            except Exception as e:
-                logger.error(f"Error storing communication focus: {str(e)}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                db.session.rollback()
-
-        # Store hierarchical keywords if present
-        if "hierarchical_keywords" in response:
-            try:
-                # Import the DocumentKeywordManager
-                from src.catalog.services.keyword_manager import DocumentKeywordManager
-
-                # Get the hierarchical keywords data from the response
-                logger.info(
-                    f"Processing hierarchical_keywords for document {document_id}")
-                hierarchical_keywords_data = response.get(
-                    'hierarchical_keywords', [])
-
-                # Log a preview of the data
-                preview = hierarchical_keywords_data[:2] if isinstance(
-                    hierarchical_keywords_data, list) else hierarchical_keywords_data
-                logger.info(f"Hierarchical keywords data preview: {preview}")
-
-                # Process the keywords using the manager
-                if hierarchical_keywords_data:
-                    success = DocumentKeywordManager.process_document_keywords(
-                        document_id=document_id,
-                        keyword_data=hierarchical_keywords_data,
-                        max_keywords=10  # Limit to 10 keywords
-                    )
-
-                    if success:
+                        # Store hierarchical keywords
+                        doc_keywords = LLMResponseParser.parse_hierarchical_keywords(
+                            wrapped_data, document_id)
                         logger.info(
-                            f"Successfully processed hierarchical keywords for document {document_id}")
-                    else:
-                        logger.error(
-                            f"Failed to process hierarchical keywords for document {document_id}")
-                else:
-                    logger.warning(
-                        f"No hierarchical keywords data found for document {document_id}")
+                            f"Processing {len(doc_keywords)} hierarchical keywords for document {document_id}")
 
-            except Exception as e:
+                        # Convert DocumentKeyword objects to LLMKeyword objects
+                        keywords_added = 0
+                        for doc_keyword in doc_keywords:
+                            try:
+                                # Get the taxonomy term directly from the database
+                                taxonomy_term = KeywordTaxonomy.query.get(
+                                    doc_keyword.taxonomy_id)
+                                if taxonomy_term:
+                                    logger.info(
+                                        f"Creating LLMKeyword for term: {taxonomy_term.term}")
+                                    keyword = LLMKeyword(
+                                        llm_analysis_id=llm_analysis.id,
+                                        keyword=taxonomy_term.term,
+                                        category=taxonomy_term.primary_category,
+                                        relevance_score=int(
+                                            doc_keyword.relevance_score * 100) if doc_keyword.relevance_score else 0
+                                    )
+                                    db.session.add(keyword)
+                                    keywords_added += 1
+                                    logger.info(
+                                        f"Added keyword {taxonomy_term.term} to session")
+                                else:
+                                    logger.warning(
+                                        f"No taxonomy term found for ID {doc_keyword.taxonomy_id}")
+                            except Exception as keyword_error:
+                                logger.error(
+                                    f"Error processing individual keyword: {str(keyword_error)}")
+                                logger.error(traceback.format_exc())
+                                continue
+
+                        # Commit the changes
+                        try:
+                            db.session.commit()
+                            logger.info(
+                                f"Successfully committed {keywords_added} keywords to database")
+                        except Exception as commit_error:
+                            logger.error(
+                                f"Error committing keywords: {str(commit_error)}")
+                            logger.error(traceback.format_exc())
+                            db.session.rollback()
+                            raise
+
+                        # Verify keywords were stored using llm_analysis_id
+                        stored_keywords = LLMKeyword.query.filter_by(
+                            llm_analysis_id=llm_analysis.id).count()
+                        if stored_keywords != keywords_added:
+                            logger.error(
+                                f"Keyword count mismatch: expected {keywords_added}, found {stored_keywords}")
+                            # Try to rollback and re-add any missing keywords
+                            db.session.rollback()
+                            raise Exception(
+                                f"Keyword count mismatch: expected {keywords_added}, found {stored_keywords}")
+                        else:
+                            logger.info(
+                                f"Verification: {stored_keywords} keywords in database for analysis {llm_analysis.id}")
+                            logger.info(
+                                f"Successfully processed hierarchical keywords for document {document_id}")
+                    except Exception as e:
+                        logger.error(
+                            f"Error storing hierarchical keywords: {str(e)}")
+                        logger.error(traceback.format_exc())
+                        db.session.rollback()
+                        raise
+
+            except Exception as component_error:
                 logger.error(
-                    f"Error processing hierarchical keywords: {str(e)}")
+                    f"Error storing {component}: {str(component_error)}")
                 logger.error(f"Traceback: {traceback.format_exc()}")
                 db.session.rollback()
+                # Continue processing other components instead of failing completely
+                continue
+
+        return True
 
     except Exception as e:
-        logger.error(
-            f"Error storing partial analysis results: {str(e)}")
+        logger.error(f"Error in store_partial_analysis: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         db.session.rollback()
         return False
