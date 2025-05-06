@@ -121,8 +121,16 @@ class LLMService:
                     if component == "metadata" and "document_analysis" in component_result:
                         metadata = component_result["document_analysis"]
 
-                    # Add to combined results
-                    results.update(component_result)
+                    # For communication component, ensure it's properly formatted
+                    if component == "communication" and "communication_focus" in component_result:
+                        results["communication_focus"] = component_result["communication_focus"]
+                    # For entities component, ensure it's properly formatted
+                    elif component == "entities" and "entities" in component_result:
+                        results["entities"] = component_result["entities"]
+                    else:
+                        # Add to combined results
+                        results.update(component_result)
+
                     logger.info(
                         f"Successfully processed component: {component}, result keys: {list(component_result.keys())}")
                 else:
@@ -256,6 +264,8 @@ class LLMService:
                     # Handle system message properly as a top-level parameter
                     if isinstance(prompt, dict) and "system" in prompt:
                         request_payload["system"] = prompt["system"]
+                        logger.info(
+                            f"Using system prompt: {prompt['system'][:100]}...")
 
                     # Add user message with optional image
                     user_content = []
@@ -263,10 +273,15 @@ class LLMService:
                     # Handle different prompt formats
                     if isinstance(prompt, dict) and "user" in prompt:
                         user_text = prompt["user"]
+                        logger.info(f"Using user prompt: {user_text[:100]}...")
                     elif isinstance(prompt, str):
                         user_text = prompt
+                        logger.info(
+                            f"Using string prompt: {user_text[:100]}...")
                     else:
                         user_text = str(prompt)
+                        logger.info(
+                            f"Using converted prompt: {user_text[:100]}...")
 
                     user_content.append({
                         "type": "text",
@@ -275,6 +290,7 @@ class LLMService:
 
                     # Add image if available
                     if image_data and isinstance(image_data, dict) and "base64" in image_data:
+                        logger.info("Adding image data to request")
                         user_content.append({
                             "type": "image",
                             "source": {
@@ -315,6 +331,8 @@ class LLMService:
 
                     # Process response
                     data = response.json()
+                    logger.info(
+                        f"Received response with keys: {list(data.keys())}")
 
                     # Process response content
                     content = data.get('content', [])
@@ -340,8 +358,12 @@ class LLMService:
                         # Look for JSON within the entire text first
                         try:
                             result = json.loads(message_text)
+                            logger.info(
+                                f"Successfully parsed full response as JSON with keys: {list(result.keys())}")
                             return result
-                        except json.JSONDecodeError:
+                        except json.JSONDecodeError as e:
+                            logger.warning(
+                                f"Could not parse full response as JSON: {str(e)}")
                             # Not valid JSON, continue with partial extraction
                             pass
 
@@ -362,6 +384,8 @@ class LLMService:
                                     try:
                                         json_obj = json.loads(json_candidate)
                                         json_matches.append(json_obj)
+                                        logger.info(
+                                            f"Found valid JSON object with keys: {list(json_obj.keys())}")
                                     except:
                                         pass
                                     start_idx = None
@@ -369,6 +393,8 @@ class LLMService:
                         # If we found any valid JSON objects
                         if json_matches:
                             # Return the first valid match
+                            logger.info(
+                                f"Returning first valid JSON match with keys: {list(json_matches[0].keys())}")
                             return json_matches[0]
 
                         # If we get here, no valid JSON was found

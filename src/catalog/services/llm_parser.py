@@ -249,7 +249,19 @@ class LLMResponseParser:
     def parse_entity_info(data: Dict[str, Any]) -> Dict[str, Any]:
         """Parse and validate entity information"""
         try:
-            entities = data.get('entities', {})
+            # Log the input data structure for debugging
+            logger.info(
+                f"Starting entity info parsing with data keys: {list(data.keys())}")
+            logger.info(f"Raw data: {json.dumps(data, indent=2)}")
+
+            # Check if data is already in the expected format (top-level keys)
+            if all(key in data for key in ['client_name', 'opponent_name', 'creation_date', 'survey_question', 'file_identifier']):
+                entities = data
+                logger.info("Using top-level entity data")
+            else:
+                # Try to get entities from nested structure
+                entities = data.get('entities', {})
+                logger.info(f"Using nested entity data: {entities}")
 
             # Handle string or other non-dict values
             if not isinstance(entities, dict):
@@ -258,6 +270,8 @@ class LLMResponseParser:
                 if isinstance(entities, str):
                     try:
                         entities = json.loads(entities)
+                        logger.info(
+                            "Successfully parsed string entities as JSON")
                     except:
                         entities = {"client_name": entities}
                 else:
@@ -267,17 +281,36 @@ class LLMResponseParser:
                 logger.warning("No entities found in LLM response")
                 entities = {}
 
+            # Extract and validate each field
+            client_name = LLMResponseParser.ensure_string(
+                entities.get('client_name', ''))
+            opponent_name = LLMResponseParser.ensure_string(
+                entities.get('opponent_name', ''))
+            creation_date = LLMResponseParser.ensure_string(
+                entities.get('creation_date', ''))
+            survey_question = LLMResponseParser.ensure_string(
+                entities.get('survey_question', ''))
+            file_identifier = LLMResponseParser.ensure_string(
+                entities.get('file_identifier', ''))
+
+            # Log extracted values
+            logger.info(f"Extracted client_name: {client_name}")
+            logger.info(f"Extracted opponent_name: {opponent_name}")
+            logger.info(f"Extracted creation_date: {creation_date}")
+            logger.info(f"Extracted survey_question: {survey_question}")
+            logger.info(f"Extracted file_identifier: {file_identifier}")
+
             result = {
-                'client_name': LLMResponseParser.ensure_string(entities.get('client_name', '')),
-                'opponent_name': LLMResponseParser.ensure_string(entities.get('opponent_name', '')),
-                'creation_date': LLMResponseParser.ensure_string(entities.get('creation_date', '')),
-                'survey_question': LLMResponseParser.ensure_string(entities.get('survey_question', '')),
-                'file_identifier': LLMResponseParser.ensure_string(entities.get('file_identifier', '')),
+                'client_name': client_name,
+                'opponent_name': opponent_name,
+                'creation_date': creation_date,
+                'survey_question': survey_question,
+                'file_identifier': file_identifier,
                 'created_date': datetime.utcnow()
             }
 
             logger.info(
-                f"Parsed entity information with client: {result['client_name']}")
+                f"Successfully parsed entity information with client: {result['client_name']}")
             return result
 
         except Exception as e:
@@ -324,10 +357,27 @@ class LLMResponseParser:
                 secondary_issues = LLMResponseParser.ensure_string(
                     secondary_issues)
 
+            # Handle messaging_strategy with validation
+            messaging_strategy = focus.get('messaging_strategy', '')
+            if messaging_strategy:
+                # Normalize messaging strategy to lowercase
+                messaging_strategy = messaging_strategy.lower()
+                # Map to standard categories if needed
+                strategy_mapping = {
+                    'attack': 'attack',
+                    'positive': 'positive',
+                    'comparison': 'comparison',
+                    'contrast': 'comparison',
+                    'informational': 'informational',
+                    'educational': 'informational'
+                }
+                messaging_strategy = strategy_mapping.get(
+                    messaging_strategy, messaging_strategy)
+
             result = {
                 'primary_issue': LLMResponseParser.ensure_string(focus.get('primary_issue', '')),
                 'secondary_issues': secondary_issues,
-                'messaging_strategy': LLMResponseParser.ensure_string(focus.get('messaging_strategy', '')),
+                'messaging_strategy': LLMResponseParser.ensure_string(messaging_strategy),
                 'created_date': datetime.utcnow()
             }
 

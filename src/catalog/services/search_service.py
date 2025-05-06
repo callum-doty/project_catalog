@@ -8,7 +8,7 @@ from sqlalchemy.orm import joinedload
 from src.catalog import db, cache
 
 from src.catalog.models import Document, LLMAnalysis, ExtractedText, DesignElement
-from src.catalog.models import KeywordTaxonomy, KeywordSynonym, DocumentKeyword
+from src.catalog.models import KeywordTaxonomy, KeywordSynonym, DocumentKeyword, LLMKeyword
 from src.catalog.constants import CACHE_TIMEOUTS, DEFAULTS, SEARCH_TYPES, DOCUMENT_STATUSES
 from src.catalog.services.preview_service import PreviewService
 from src.catalog.services.embeddings_service import EmbeddingsService
@@ -502,7 +502,7 @@ class SearchService:
             Dictionary with facet information
         """
         try:
-            # Create a CTE for documents that have keywords
+            # Create a CTE for documents that have keywords with improved performance
             docs_with_keywords = db.session.query(
                 DocumentKeyword.taxonomy_id,
                 func.count(DocumentKeyword.document_id.distinct()
@@ -511,24 +511,26 @@ class SearchService:
                 DocumentKeyword.taxonomy_id
             ).cte('docs_with_keywords')
 
-            # Get primary categories with counts
+            # Get primary categories with counts using a more efficient query
             primary_categories = db.session.query(
                 KeywordTaxonomy.primary_category,
-                func.sum(docs_with_keywords.c.doc_count).label('count')
+                func.count(DocumentKeyword.document_id.distinct()
+                           ).label('count')
             ).join(
-                docs_with_keywords, KeywordTaxonomy.id == docs_with_keywords.c.taxonomy_id
+                DocumentKeyword, KeywordTaxonomy.id == DocumentKeyword.taxonomy_id
             ).group_by(
                 KeywordTaxonomy.primary_category
             ).order_by(
                 KeywordTaxonomy.primary_category
             ).all()
 
-            # If a primary category is selected, get subcategories
+            # If a primary category is selected, get subcategories with improved query
             subcategories = []
             if selected_primary:
                 subcategories = db.session.query(
                     KeywordTaxonomy.subcategory,
-                    func.count(KeywordTaxonomy.id.distinct()).label('count')
+                    func.count(DocumentKeyword.document_id.distinct()).label(
+                        'count')
                 ).filter(
                     KeywordTaxonomy.primary_category == selected_primary
                 ).join(
@@ -557,20 +559,34 @@ class SearchService:
                     KeywordTaxonomy.term
                 ).all()
 
-            # Format results
+            # Format results with additional metadata
             result = {
                 'primary_categories': [
-                    {'name': cat, 'count': count,
-                        'selected': cat == selected_primary}
+                    {
+                        'name': cat,
+                        'count': count,
+                        'selected': cat == selected_primary,
+                        # Add metadata about subcategories
+                        'has_subcategories': any(s[0] for s in subcategories if s[0])
+                    }
                     for cat, count in primary_categories
                 ],
                 'subcategories': [
-                    {'name': subcat, 'count': count,
-                        'selected': subcat == selected_subcategory}
+                    {
+                        'name': subcat,
+                        'count': count,
+                        'selected': subcat == selected_subcategory,
+                        # Add metadata about terms
+                        'has_terms': any(t[0] for t in terms if t[0])
+                    }
                     for subcat, count in subcategories
                 ] if selected_primary else [],
                 'terms': [
-                    {'name': term, 'count': count, 'selected': term == selected_term}
+                    {
+                        'name': term,
+                        'count': count,
+                        'selected': term == selected_term
+                    }
                     for term, count in terms
                 ] if selected_primary and selected_subcategory else []
             }
@@ -626,8 +642,9 @@ class SearchService:
                     f"%{filter_location.lower()}%")
             )
 
-        # Apply taxonomy filters
+        # Apply taxonomy filters with improved performance
         if primary_category:
+            # Use a subquery to get document IDs that match the taxonomy criteria
             taxonomy_query = db.session.query(DocumentKeyword.document_id).join(
                 KeywordTaxonomy, DocumentKeyword.taxonomy_id == KeywordTaxonomy.id
             ).filter(
@@ -636,15 +653,17 @@ class SearchService:
 
             if subcategory:
                 taxonomy_query = taxonomy_query.filter(
-                    KeywordTaxonomy.subcategory == subcategory)
+                    KeywordTaxonomy.subcategory == subcategory
+                )
 
             if specific_term:
                 taxonomy_query = taxonomy_query.filter(
-                    KeywordTaxonomy.term == specific_term)
+                    KeywordTaxonomy.term == specific_term
+                )
 
+            # Use EXISTS for better performance
             taxonomy_ids = taxonomy_query.subquery()
-            query = query.join(taxonomy_ids, Document.id ==
-                               taxonomy_ids.c.document_id)
+            query = query.filter(Document.id.in_(taxonomy_ids))
 
         return query
 

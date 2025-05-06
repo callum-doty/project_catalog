@@ -182,14 +182,14 @@ def process_batch1(llm_service, filename, document_id):
 
 
 def process_batch2(llm_service, filename, document_id):
-    """Process the second batch of document analysis (classification, entities, design, keywords)"""
+    """Process the second batch of document analysis (classification, entities, design, keywords, communication)"""
     logger.info(f"Processing batch 2 for document {document_id}: {filename}")
 
     try:
         # Process all batch 2 components together
         batch2_response = llm_service.analyze_document_modular(
-            filename, components=["classification",
-                                  "entities", "design", "keywords"]
+            filename, components=[
+                "classification", "entities", "design", "keywords", "communication"]
         )
 
         if batch2_response:
@@ -388,6 +388,18 @@ def store_partial_analysis(document_id: int, response: dict):
                     db.session.add(entity)
                     db.session.commit()
                     logger.info("Successfully stored entity information")
+
+                elif component == "communication_focus":
+                    # Store communication focus
+                    focus_data = LLMResponseParser.parse_communication_focus(
+                        response)
+                    focus = CommunicationFocus(
+                        document_id=document_id,
+                        **focus_data
+                    )
+                    db.session.add(focus)
+                    db.session.commit()
+                    logger.info("Successfully stored communication focus data")
 
                 elif component == "hierarchical_keywords":
                     try:
