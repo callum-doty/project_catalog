@@ -338,7 +338,6 @@ function updateResults(data) {
             
             cardHTML += `</div>`;
             
-            // Add View Document button
             cardHTML += `
                 <div class="mt-4">
                     <a href="/document/${encodeURIComponent(doc.filename || 'Untitled Document')}" 
