@@ -543,3 +543,68 @@ function updateTaxonomyFacets(facets) {
         console.error("Error updating taxonomy facets:", error);
     }
 }
+
+document.addEventListener('DOMContentLoaded', function() {
+    // First, try direct selectors
+    const checkViewButtons = function() {
+      // This runs when new content is loaded via AJAX or initially
+      document.querySelectorAll('.document-card').forEach(card => {
+        // Check if the card already has a view button
+        const existingButton = card.querySelector('.view-document-button');
+        
+        if (!existingButton) {
+          // No button found, let's add one
+          const filename = card.querySelector('h3.text-lg').textContent.trim();
+          
+          // Create the view button container
+          const buttonContainer = document.createElement('div');
+          buttonContainer.className = 'mt-4';
+          
+          // Create the view button
+          const viewButton = document.createElement('a');
+          viewButton.href = `/document/${encodeURIComponent(filename)}`;
+          viewButton.className = 'view-document-button w-full block text-center px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50';
+          viewButton.textContent = 'View Document';
+          viewButton.target = '_blank';
+          viewButton.rel = 'noopener noreferrer';
+          
+          // Add button to container
+          buttonContainer.appendChild(viewButton);
+          
+          // Find the place to insert the button - at the end of the card content
+          const cardContent = card.querySelector('.p-6');
+          if (cardContent) {
+            cardContent.appendChild(buttonContainer);
+          }
+        }
+      });
+    };
+  
+    // Run initially
+    checkViewButtons();
+    
+    // Set up mutation observer to watch for dynamic content changes
+    const resultsGrid = document.getElementById('resultsGrid');
+    if (resultsGrid) {
+      const observer = new MutationObserver(function(mutations) {
+        checkViewButtons();
+      });
+      
+      observer.observe(resultsGrid, { 
+        childList: true,
+        subtree: true 
+      });
+    }
+    
+    // Also listen for AJAX events
+    document.addEventListener('ajaxComplete', checkViewButtons);
+    
+    // Handle direct DOM changes after search
+    const searchForm = document.getElementById('searchForm');
+    if (searchForm) {
+      searchForm.addEventListener('submit', function() {
+        // Run the check again shortly after the form submission
+        setTimeout(checkViewButtons, 1000);
+      });
+    }
+  });

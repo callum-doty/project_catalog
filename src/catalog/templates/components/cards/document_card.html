@@ -1,67 +1,37 @@
 <!-- templates/components/cards/document_card.html -->
 {% macro document_card(doc) %}
 <div
-  class="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow"
+  class="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow document-card"
 >
-  <div class="px-4 py-2 bg-gray-50 border-b flex justify-between">
-    <!-- Status Badge -->
-    {% set status_colors = { 'PENDING': 'bg-yellow-100 text-yellow-800',
-    'PROCESSING': 'bg-blue-100 text-blue-800', 'COMPLETED': 'bg-green-100
-    text-green-800', 'FAILED': 'bg-red-100 text-red-800' } %}
-    <span
-      class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ status_colors.get(doc.status, 'bg-gray-100 text-gray-800') }}"
-    >
-      {{ doc.status }}
-    </span>
-
-    <!-- Document Type Badge - if available -->
-    {% if doc.document_type %}
-    <span
-      class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800"
-    >
-      {{ doc.document_type }}
-    </span>
-    {% endif %}
-
-    <!-- Year Badge - if available -->
-    {% if doc.election_year %}
-    <span
-      class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800"
-    >
-      {{ doc.election_year }}
-    </span>
-    {% endif %}
-  </div>
-
-  {% if doc.hierarchical_keywords %}
-  <div class="mt-3">
-    <h4 class="text-xs font-medium text-gray-700 mb-1">Categories</h4>
-    <div class="flex flex-wrap gap-1">
-      {% for kw in doc.hierarchical_keywords %}
-      <span
-        class="inline-flex flex-col px-2 py-1 rounded-md text-xs bg-blue-50 text-blue-700"
-      >
-        <span>{{ kw.term }}</span>
-        <span class="text-[10px] text-blue-400">{{ kw.subcategory }}</span>
-      </span>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
   <!-- Preview Section -->
-
-  <div
-    class="preview-container"
-    data-filename="{{ doc.filename }}"
-    data-loaded="false"
-  >
-    <div class="placeholder-preview flex items-center justify-center h-full">
-      <div class="animate-pulse flex flex-col items-center">
-        <div class="rounded-lg bg-gray-200 h-32 w-48"></div>
-        <div class="text-gray-400 mt-2">Loading preview...</div>
-      </div>
+  <div class="w-full h-48 bg-gray-100 flex items-center justify-center">
+    {% if doc.preview %}
+    <img
+      src="{{ doc.preview }}"
+      alt="Preview of {{ doc.filename }}"
+      class="w-full h-full object-contain preview-image"
+      loading="lazy"
+      decoding="async"
+      onerror="this.onerror=null; this.src='/static/img/placeholder.png';"
+    />
+    {% else %}
+    <div class="flex flex-col items-center text-gray-400">
+      <svg
+        class="w-12 h-12 mb-2"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+        />
+      </svg>
+      <span>No preview available</span>
     </div>
+    {% endif %}
   </div>
 
   <div class="p-6">
@@ -71,78 +41,87 @@
         <h3 class="text-lg font-semibold text-gray-900">{{ doc.filename }}</h3>
         <p class="text-sm text-gray-500">Uploaded: {{ doc.upload_date }}</p>
       </div>
-    <div class="mt-4">
-      <a href="{{ url_for('main_routes.view_document', filename=doc.filename) }}" 
-          target="_blank" 
-          rel="noopener noreferrer" 
-          class="w-full block text-center px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none">
-        View Document
-      </a>
-    </div>
 
-      <!-- Tone Badge - if available -->
-      {% if doc.document_tone %} {% set tone_colors = { 'positive':
-      'bg-green-100 text-green-800', 'negative': 'bg-red-100 text-red-800',
-      'neutral': 'bg-gray-100 text-gray-800', 'informational': 'bg-blue-100
-      text-blue-800' } %}
+      <!-- Status Badge -->
+      {% set status_colors = { 'PENDING': 'bg-yellow-100 text-yellow-800',
+      'PROCESSING': 'bg-blue-100 text-blue-800', 'COMPLETED': 'bg-green-100
+      text-green-800', 'FAILED': 'bg-red-100 text-red-800' } %} {% if doc.status
+      %}
       <span
-        class="inline-block px-2 py-1 rounded text-xs font-medium {{ tone_colors.get(doc.document_tone.lower(), 'bg-gray-100 text-gray-800') }}"
+        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ status_colors.get(doc.status, 'bg-gray-100 text-gray-800') }}"
       >
-        {{ doc.document_tone|title }}
+        {{ doc.status }}
       </span>
       {% endif %}
     </div>
 
-    <!-- Entity Information -->
-    {% if doc.client or doc.opponent %}
-    <div class="mb-4 p-3 bg-gray-50 rounded-md">
-      {% if doc.client %}
-      <div class="flex items-center mb-1">
-        <svg
-          class="w-4 h-4 mr-1 text-gray-600"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-          ></path>
-        </svg>
-        <span class="text-sm font-medium text-gray-700">Client:</span>
-        <span class="text-sm ml-1 text-gray-900">{{ doc.client }}</span>
-      </div>
-      {% endif %} {% if doc.opponent %}
-      <div class="flex items-center">
-        <svg
-          class="w-4 h-4 mr-1 text-gray-600"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
-          ></path>
-        </svg>
-        <span class="text-sm font-medium text-gray-700">Opponent:</span>
-        <span class="text-sm ml-1 text-gray-900">{{ doc.opponent }}</span>
-      </div>
+    <!-- Document Type & Year Badges (if available) -->
+    <div class="mb-3 flex flex-wrap gap-2">
+      {% if doc.document_type %}
+      <span
+        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800"
+      >
+        {{ doc.document_type }}
+      </span>
+      {% endif %} {% if doc.election_year %}
+      <span
+        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800"
+      >
+        {{ doc.election_year }}
+      </span>
+      {% endif %} {% if doc.document_tone %}
+      <span
+        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+      >
+        {{ doc.document_tone }}
+      </span>
       {% endif %}
+    </div>
+
+    <!-- Hierarchical Keywords -->
+    {% if doc.hierarchical_keywords %}
+    <div class="mb-3">
+      <h4 class="text-xs font-medium text-gray-700 mb-1">Categories</h4>
+      <div class="flex flex-wrap gap-1">
+        {% for kw in doc.hierarchical_keywords %}
+        <span
+          class="inline-flex flex-col px-2 py-1 rounded-md text-xs bg-blue-50 text-blue-700"
+        >
+          <span>{{ kw.term }}</span>
+          {% if kw.subcategory %}
+          <span class="text-[10px] text-blue-400">{{ kw.subcategory }}</span>
+          {% endif %}
+        </span>
+        {% endfor %}
+      </div>
     </div>
     {% endif %}
 
-    <!-- Location & Audience -->
-    {% if doc.location or doc.target_audience %}
+    <!-- Summary -->
+    {% if doc.summary %}
     <div class="mb-4">
+      <h4 class="text-xs font-medium text-gray-700 mb-1">Summary</h4>
+      <p class="text-sm text-gray-600 line-clamp-3">{{ doc.summary }}</p>
+    </div>
+    {% endif %}
+
+    <!-- Main Message if available -->
+    {% if doc.main_message %}
+    <div class="mb-4">
+      <h4 class="text-xs font-medium text-gray-700 mb-1">Main Message</h4>
+      <p class="text-sm text-gray-800 font-medium italic">
+        {{ doc.main_message }}
+      </p>
+    </div>
+    {% endif %}
+
+    <!-- Location & Audience (if available) -->
+    {% if doc.location or doc.target_audience %}
+    <div class="mb-4 text-xs">
       {% if doc.location %}
       <div class="flex items-center mb-1">
         <svg
-          class="w-4 h-4 mr-1 text-gray-600"
+          class="w-3 h-3 mr-1 text-gray-600"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -160,12 +139,12 @@
             d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
           ></path>
         </svg>
-        <span class="text-sm text-gray-700">{{ doc.location }}</span>
+        <span class="text-gray-700">{{ doc.location }}</span>
       </div>
       {% endif %} {% if doc.target_audience %}
       <div class="flex items-center">
         <svg
-          class="w-4 h-4 mr-1 text-gray-600"
+          class="w-3 h-3 mr-1 text-gray-600"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -177,62 +156,19 @@
             d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
           ></path>
         </svg>
-        <span class="text-sm text-gray-700">{{ doc.target_audience }}</span>
+        <span class="text-gray-700">{{ doc.target_audience }}</span>
       </div>
       {% endif %}
     </div>
     {% endif %}
 
-    <!-- Main Message -->
-    {% if doc.main_message %}
-    <div class="mb-4">
-      <h4 class="text-sm font-medium text-gray-700 mb-1">Main Message</h4>
-      <p class="text-sm text-gray-800 font-medium italic">
-        {{ doc.main_message }}
-      </p>
-    </div>
-    {% endif %}
-
-    <!-- Summary -->
-    {% if doc.summary %}
-    <div class="mb-4">
-      <h4 class="text-sm font-medium text-gray-700 mb-1">Summary</h4>
-      <p class="text-sm text-gray-600 line-clamp-3">{{ doc.summary }}</p>
-    </div>
-    {% endif %}
-
-    <!-- Primary Issue -->
-    {% if doc.primary_issue %}
-    <div class="mb-4">
-      <h4 class="text-sm font-medium text-gray-700 mb-1">Primary Issue</h4>
-      <p class="text-sm text-gray-800">{{ doc.primary_issue }}</p>
-    </div>
-    {% endif %}
-
-    <!-- Keywords -->
-    {% if doc.keywords %}
-    <div>
-      <h4 class="text-sm font-medium text-gray-700 mb-1">Keywords</h4>
-      <div class="flex flex-wrap gap-2">
-        {% for keyword in doc.keywords %}
-        <span
-          class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
-        >
-          {{ keyword.text }} {% if keyword.category %}
-          <span class="ml-1 text-blue-600">({{ keyword.category }})</span>
-          {% endif %}
-        </span>
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
-    
+    <!-- View Document Button -->
     <div class="mt-4">
-      
+      <a
         href="{{ url_for('main_routes.view_document', filename=doc.filename) }}"
         target="_blank"
         rel="noopener noreferrer"
-        class="w-full block text-center px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none"
+        class="view-document-button w-full block text-center px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
       >
         View Document
       </a>
