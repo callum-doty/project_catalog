@@ -464,10 +464,14 @@ class LLMResponseParser:
             }
 
     @staticmethod
-    def parse_hierarchical_keywords(data: Dict[str, Any], document_id: int) -> List[LLMKeyword]:
+    def parse_hierarchical_keywords(data: Dict[str, Any], llm_analysis_id: int) -> List[LLMKeyword]:
         """
         Parse hierarchical keywords and map to taxonomy.
         Returns a list of LLMKeyword objects ready to be added to the database.
+
+        Args:
+            data: Response data containing hierarchical keywords
+            llm_analysis_id: ID of the LLMAnalysis record to associate keywords with
         """
         try:
             # Get hierarchical keywords from response
@@ -557,13 +561,16 @@ class LLMResponseParser:
                                     )
                                     db.session.add(synonym)
 
-                    # Create document keyword association
-                    doc_keyword = LLMKeyword(
-                        document_id=document_id,
+                    # Create LLMKeyword association with LLMAnalysis
+                    llm_keyword = LLMKeyword(
+                        llm_analysis_id=llm_analysis_id,
                         taxonomy_id=taxonomy_term.id,
-                        relevance_score=relevance_score
+                        keyword=specific_term,
+                        category=primary_category,
+                        relevance_score=int(
+                            relevance_score * 100) if isinstance(relevance_score, float) else relevance_score
                     )
-                    document_keywords.append(doc_keyword)
+                    document_keywords.append(llm_keyword)
 
                 except Exception as e:
                     logger.error(
@@ -572,7 +579,7 @@ class LLMResponseParser:
                     continue
 
             logger.info(
-                f"Successfully parsed {len(LLMKeyword)} LLMkeywords")
+                f"Successfully parsed {len(document_keywords)} LLMKeywords")
             return document_keywords
 
         except Exception as e:
