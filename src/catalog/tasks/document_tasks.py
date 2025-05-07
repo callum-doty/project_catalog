@@ -193,7 +193,29 @@ def process_batch2(llm_service, filename, document_id):
         )
 
         if batch2_response:
+            # First, store the basic components
             success = store_partial_analysis(document_id, batch2_response)
+
+            # Then, specifically handle keyword mapping to taxonomy
+            if "hierarchical_keywords" in batch2_response:
+                # Get the LLM analysis ID
+                llm_analysis = LLMAnalysis.query.filter_by(
+                    document_id=document_id).first()
+                if llm_analysis:
+                    # Extract keywords from response
+                    keywords_data = []
+                    for kw in batch2_response.get("hierarchical_keywords", []):
+                        if isinstance(kw, dict) and "term" in kw:
+                            keywords_data.append({
+                                "keyword": kw["term"],
+                                "category": kw.get("category", ""),
+                                "relevance_score": kw.get("relevance_score", 0)
+                            })
+
+                    # Map keywords to taxonomy
+                    map_keywords_to_taxonomy(
+                        document_id, llm_analysis.id, keywords_data)
+
             if success:
                 logger.info("✅ Batch 2 components stored successfully")
                 return True
@@ -319,8 +341,6 @@ def process_document(self, filename, minio_path, document_id):
 
             return False
 
-
-# Fix for store_partial_analysis() function in src/catalog/tasks/document_tasks.py
 
 def store_partial_analysis(document_id: int, response: dict):
     """Store partial analysis results in database"""
@@ -508,6 +528,92 @@ def store_partial_analysis(document_id: int, response: dict):
     except Exception as e:
         logger.error(f"Error in store_partial_analysis: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
+        db.session.rollback()
+        return False
+
+
+def map_keywords_to_taxonomy(document_id, llm_analysis_id, keywords):
+    """Map extracted keywords to taxonomy terms"""
+    from src.catalog.models import KeywordTaxonomy, LLMKeyword, KeywordSynonym
+    from src.catalog import db
+    from sqlalchemy import func
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Get existing keywords from LLM analysis
+        llm_keywords = LLMKeyword.query.filter_by(
+            llm_analysis_id=llm_analysis_id).all()
+
+        # If keywords already exist for this analysis, we can skip
+        if llm_keywords:
+            logger.info(
+                f"Keywords already exist for analysis ID {llm_analysis_id}")
+            return True
+
+        # Process each keyword
+        keywords_added = 0
+        for keyword_data in keywords:
+            keyword_text = keyword_data.get('keyword', '').strip().lower()
+            if not keyword_text:
+                continue
+
+            # First, try to find an exact match in taxonomy
+            taxonomy_term = KeywordTaxonomy.query.filter(
+                func.lower(KeywordTaxonomy.term) == keyword_text
+            ).first()
+
+            # If no exact match, try partial matches
+            if not taxonomy_term:
+                taxonomy_term = KeywordTaxonomy.query.filter(
+                    func.lower(KeywordTaxonomy.term).like(f"%{keyword_text}%")
+                ).first()
+
+            # If still no match, try synonyms
+            if not taxonomy_term:
+                synonym_match = db.session.query(KeywordTaxonomy).join(
+                    KeywordSynonym, KeywordTaxonomy.id == KeywordSynonym.taxonomy_id
+                ).filter(
+                    func.lower(KeywordSynonym.synonym) == keyword_text
+                ).first()
+
+                if synonym_match:
+                    taxonomy_term = synonym_match
+
+            # Add the keyword with taxonomy information if found
+            keyword = LLMKeyword(
+                llm_analysis_id=llm_analysis_id,
+                keyword=keyword_data.get('keyword', ''),
+                category=keyword_data.get('category', '')
+            )
+
+            # Add taxonomy reference if found
+            if taxonomy_term:
+                keyword.taxonomy_id = taxonomy_term.id
+                logger.info(
+                    f"Mapped keyword '{keyword_text}' to taxonomy term '{taxonomy_term.term}'")
+            else:
+                logger.info(
+                    f"No taxonomy match found for keyword '{keyword_text}'")
+
+            # Set relevance score
+            if 'relevance_score' in keyword_data:
+                keyword.relevance_score = keyword_data['relevance_score']
+
+            db.session.add(keyword)
+            keywords_added += 1
+
+        # Commit all keywords at once
+        if keywords_added > 0:
+            db.session.commit()
+            logger.info(
+                f"Added {keywords_added} keywords with taxonomy mapping for document {document_id}")
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Error mapping keywords to taxonomy: {str(e)}")
         db.session.rollback()
         return False
 

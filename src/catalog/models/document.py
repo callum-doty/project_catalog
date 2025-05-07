@@ -118,6 +118,10 @@ class LLMKeyword(db.Model):
     keyword = db.Column(db.Text)
     category = db.Column(db.Text)
     relevance_score = db.Column(db.BigInteger)
+    taxonomy_id = db.Column(db.Integer, db.ForeignKey(
+        'keyword_taxonomy.id'), nullable=True)
+    taxonomy = db.relationship(
+        'KeywordTaxonomy', backref='llm_keywords', lazy='joined')
 
 
 class Classification(db.Model):
