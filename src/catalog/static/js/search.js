@@ -1,4 +1,3 @@
-
 document.addEventListener('DOMContentLoaded', function() {
     // Handle missing previews gracefully
     const previewImages = document.querySelectorAll('.preview-image');
@@ -337,7 +336,21 @@ function updateResults(data) {
                 `;
             }
             
-            cardHTML += `</div></div>`;
+            cardHTML += `</div>`;
+            
+            // Add View Document button
+            cardHTML += `
+                <div class="mt-4">
+                    <a href="/document/${encodeURIComponent(doc.filename || 'Untitled Document')}" 
+                       target="_blank" 
+                       rel="noopener noreferrer"
+                       class="view-document-button w-full block text-center px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
+                        View Document
+                    </a>
+                </div>
+            `;
+            
+            cardHTML += `</div>`;
             
             // Set the HTML content
             card.innerHTML = cardHTML;
@@ -526,14 +539,38 @@ function updateTaxonomyFacets(facets) {
             subcategoriesSection.style.display = 'none';
         }
         
+        // Terms
+        const termsContainer = document.querySelector('.facet-terms');
+        const termsSection = document.querySelector('.terms-section');
+        
+        if (termsContainer && facets.terms && facets.terms.length > 0) {
+            let html = '';
+            facets.terms.forEach(term => {
+                html += `
+                    <div class="facet-item ${term.selected ? 'selected' : ''}"
+                         onclick="updateTaxonomyFilter('specific_term', '${term.name}')">
+                        <span>${term.name}</span>
+                        <span class="text-xs text-gray-500">(${term.count})</span>
+                    </div>
+                `;
+            });
+            termsContainer.innerHTML = html;
+            if (termsSection) {
+                termsSection.style.display = 'block';
+            }
+        } else if (termsSection) {
+            termsSection.style.display = 'none';
+        }
+        
         // Update clear filters button
         const clearFiltersBtn = document.querySelector('.clear-taxonomy-filters');
         if (clearFiltersBtn) {
             const urlParams = new URLSearchParams(window.location.search);
             const primaryCategory = urlParams.get('primary_category');
             const subcategory = urlParams.get('subcategory');
+            const specificTerm = urlParams.get('specific_term');
             
-            if (primaryCategory || subcategory) {
+            if (primaryCategory || subcategory || specificTerm) {
                 clearFiltersBtn.style.display = 'block';
             } else {
                 clearFiltersBtn.style.display = 'none';
@@ -543,68 +580,3 @@ function updateTaxonomyFacets(facets) {
         console.error("Error updating taxonomy facets:", error);
     }
 }
-
-document.addEventListener('DOMContentLoaded', function() {
-    // First, try direct selectors
-    const checkViewButtons = function() {
-      // This runs when new content is loaded via AJAX or initially
-      document.querySelectorAll('.document-card').forEach(card => {
-        // Check if the card already has a view button
-        const existingButton = card.querySelector('.view-document-button');
-        
-        if (!existingButton) {
-          // No button found, let's add one
-          const filename = card.querySelector('h3.text-lg').textContent.trim();
-          
-          // Create the view button container
-          const buttonContainer = document.createElement('div');
-          buttonContainer.className = 'mt-4';
-          
-          // Create the view button
-          const viewButton = document.createElement('a');
-          viewButton.href = `/document/${encodeURIComponent(filename)}`;
-          viewButton.className = 'view-document-button w-full block text-center px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50';
-          viewButton.textContent = 'View Document';
-          viewButton.target = '_blank';
-          viewButton.rel = 'noopener noreferrer';
-          
-          // Add button to container
-          buttonContainer.appendChild(viewButton);
-          
-          // Find the place to insert the button - at the end of the card content
-          const cardContent = card.querySelector('.p-6');
-          if (cardContent) {
-            cardContent.appendChild(buttonContainer);
-          }
-        }
-      });
-    };
-  
-    // Run initially
-    checkViewButtons();
-    
-    // Set up mutation observer to watch for dynamic content changes
-    const resultsGrid = document.getElementById('resultsGrid');
-    if (resultsGrid) {
-      const observer = new MutationObserver(function(mutations) {
-        checkViewButtons();
-      });
-      
-      observer.observe(resultsGrid, { 
-        childList: true,
-        subtree: true 
-      });
-    }
-    
-    // Also listen for AJAX events
-    document.addEventListener('ajaxComplete', checkViewButtons);
-    
-    // Handle direct DOM changes after search
-    const searchForm = document.getElementById('searchForm');
-    if (searchForm) {
-      searchForm.addEventListener('submit', function() {
-        // Run the check again shortly after the form submission
-        setTimeout(checkViewButtons, 1000);
-      });
-    }
-  });
