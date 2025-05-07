@@ -11,11 +11,12 @@ from src.catalog.utils.query_builders import (
 )
 from flask import Blueprint, render_template, request, jsonify, current_app
 from src.catalog.services.search_service import SearchService
-from src.catalog import cache
+from src.catalog import cache, db
 from src.catalog.constants import CACHE_TIMEOUTS
 from src.catalog.utils import monitor_query
 from src.catalog.models import Document
 import time
+from src.catalog.models import LLMAnalysis, LLMKeyword, KeywordTaxonomy
 
 search_routes = Blueprint('search_routes', __name__)
 search_service = SearchService()
@@ -84,13 +85,44 @@ def search_documents():
         if filter_location:
             base_query = filter_by_location(base_query, filter_location)
 
+        # Handle taxonomy filtering with proper variable initialization
         if primary_category:
-            base_query = filter_by_taxonomy(
-                base_query,
-                primary_category=primary_category,
-                subcategory=subcategory,
-                specific_term=specific_term
-            )
+            try:
+                # Create the taxonomy query to get matching document IDs
+                taxonomy_query = db.session.query(LLMAnalysis.document_id).join(
+                    LLMKeyword, LLMKeyword.llm_analysis_id == LLMAnalysis.id
+                ).join(
+                    KeywordTaxonomy, LLMKeyword.taxonomy_id == KeywordTaxonomy.id
+                ).filter(
+                    KeywordTaxonomy.primary_category == primary_category
+                )
+
+                # Apply subcategory filter if present
+                if subcategory:
+                    taxonomy_query = taxonomy_query.filter(
+                        KeywordTaxonomy.subcategory == subcategory
+                    )
+
+                # Apply specific term filter if present
+                if specific_term:
+                    taxonomy_query = taxonomy_query.filter(
+                        KeywordTaxonomy.term == specific_term
+                    )
+
+                # Use the taxonomy query to filter document IDs
+                taxonomy_ids = taxonomy_query.distinct().subquery()
+                base_query = base_query.filter(Document.id.in_(taxonomy_ids))
+
+            except Exception as e:
+                current_app.logger.error(
+                    f"Error applying taxonomy filter: {str(e)}")
+                # If there's an error, try using the filter_by_taxonomy function as fallback
+                base_query = filter_by_taxonomy(
+                    base_query,
+                    primary_category=primary_category,
+                    subcategory=subcategory,
+                    specific_term=specific_term
+                )
 
         # Step 4: Apply sorting and pagination
         sorted_query = apply_sorting(base_query, sort_by, sort_direction)

@@ -496,7 +496,48 @@ function updatePagination(pagination) {
     }
 }
 
-// Update taxonomy facets
+// Taxonomy Filter Functions
+function updateTaxonomyFilter(type, value) {
+    // Log the function call for debugging
+    console.log(`Updating taxonomy filter: ${type} = ${value}`);
+    
+    const urlParams = new URLSearchParams(window.location.search);
+
+    // Update the URL parameters
+    urlParams.set(type, value);
+
+    // If changing primary category, remove subcategory and specific_term
+    if (type === "primary_category") {
+        urlParams.delete("subcategory");
+        urlParams.delete("specific_term");
+    }
+
+    // If changing subcategory, remove specific_term
+    if (type === "subcategory") {
+        urlParams.delete("specific_term");
+    }
+
+    // Reset to page 1
+    urlParams.set("page", "1");
+
+    // Update the URL and refresh
+    window.location.href = `${window.location.pathname}?${urlParams.toString()}`;
+}
+
+function clearTaxonomyFilters() {
+    console.log("Clearing all taxonomy filters");
+    const urlParams = new URLSearchParams(window.location.search);
+    urlParams.delete("primary_category");
+    urlParams.delete("subcategory");
+    urlParams.delete("specific_term");
+    
+    // Reset to page 1
+    urlParams.set("page", "1");
+    
+    window.location.href = `${window.location.pathname}?${urlParams.toString()}`;
+}
+
+// Function to update taxonomy facets display in search.js
 function updateTaxonomyFacets(facets) {
     try {
         // Primary Categories
@@ -579,3 +620,29 @@ function updateTaxonomyFacets(facets) {
         console.error("Error updating taxonomy facets:", error);
     }
 }
+
+// Make sure the functions are available globally
+window.updateTaxonomyFilter = updateTaxonomyFilter;
+window.clearTaxonomyFilters = clearTaxonomyFilters;
+window.updateTaxonomyFacets = updateTaxonomyFacets;
+
+// Initialize when document is ready
+document.addEventListener('DOMContentLoaded', function() {
+    // Get URL parameters to initialize selected filters
+    const urlParams = new URLSearchParams(window.location.search);
+    const primaryCategory = urlParams.get('primary_category');
+    const subcategory = urlParams.get('subcategory');
+    const specificTerm = urlParams.get('specific_term');
+    
+    console.log(`Initializing taxonomy filters: primary=${primaryCategory}, sub=${subcategory}, term=${specificTerm}`);
+    
+    // Update clear filters button visibility
+    const clearFiltersBtn = document.querySelector('.clear-taxonomy-filters');
+    if (clearFiltersBtn) {
+        if (primaryCategory || subcategory || specificTerm) {
+            clearFiltersBtn.style.display = 'block';
+        } else {
+            clearFiltersBtn.style.display = 'none';
+        }
+    }
+});

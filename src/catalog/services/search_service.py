@@ -690,6 +690,38 @@ class SearchService:
             else:
                 return query.order_by(Document.upload_date.asc())
 
+    def _apply_taxonomy_filter(self, query, primary_category=None, subcategory=None, specific_term=None):
+        """Apply taxonomy filter to the search query"""
+        if not primary_category:
+            return query
+
+        # Use a subquery to get document IDs with taxonomy matches using LLMKeyword
+        taxonomy_query = db.session.query(LLMKeyword.document_id).join(
+            LLMAnalysis, LLMKeyword.llm_analysis_id == LLMAnalysis.id
+        ).join(
+            KeywordTaxonomy, LLMKeyword.taxonomy_id == KeywordTaxonomy.id
+        ).filter(
+            KeywordTaxonomy.primary_category == primary_category
+        )
+
+        if subcategory:
+            taxonomy_query = taxonomy_query.filter(
+                KeywordTaxonomy.subcategory == subcategory
+            )
+
+        if specific_term:
+            taxonomy_query = taxonomy_query.filter(
+                KeywordTaxonomy.term == specific_term
+            )
+
+        # Get document IDs from the subquery
+        taxonomy_ids = taxonomy_query.distinct().subquery()
+
+        # Filter the main query with these IDs
+        query = query.filter(Document.id.in_(taxonomy_ids))
+
+        return query
+
     def _fetch_documents_with_relationships(self, document_ids):
         """
         Fetch documents with all necessary relationships for display
