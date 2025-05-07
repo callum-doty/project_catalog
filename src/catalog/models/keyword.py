@@ -91,27 +91,6 @@ class KeywordSynonym(db.Model):
         return f"<KeywordSynonym {self.synonym}>"
 
 
-class DocumentKeyword(db.Model):
-    """
-    Enhanced keyword association for documents with hierarchical information
-    and display order.
-    """
-    __tablename__ = 'document_keywords'
-    id = db.Column(db.Integer, primary_key=True)
-    document_id = db.Column(db.Integer, db.ForeignKey('documents.id'))
-    taxonomy_id = db.Column(db.Integer, db.ForeignKey('keyword_taxonomy.id'))
-    relevance_score = db.Column(db.Float)
-    extraction_date = db.Column(db.DateTime(
-        timezone=True), default=datetime.utcnow)
-    display_order = db.Column(db.Integer, default=0)
-
-    document = db.relationship('Document', backref='document_keywords')
-    taxonomy_term = db.relationship('KeywordTaxonomy')
-
-    def __repr__(self):
-        return f"<DocumentKeyword doc_id={self.document_id} term={self.taxonomy_term.term if self.taxonomy_term else 'None'} order={self.display_order}>"
-
-
 class SearchFeedback(db.Model):
     """
     User feedback on search results for improving search functionality.

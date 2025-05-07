@@ -5,7 +5,7 @@ from src.catalog.models.document import (
 )
 
 from src.catalog.models.keyword import (
-    KeywordTaxonomy, KeywordSynonym, DocumentKeyword, SearchFeedback
+    KeywordTaxonomy, KeywordSynonym, SearchFeedback
 )
 
 from src.catalog.models.scoring import DocumentScorecard
@@ -14,5 +14,5 @@ __all__ = [
     "Document", "BatchJob", "LLMAnalysis", "ExtractedText",
     "DesignElement", "Classification", "LLMKeyword", "Client",
     "Entity", "CommunicationFocus", "KeywordTaxonomy", "KeywordSynonym",
-    "DocumentKeyword", "SearchFeedback", "DocumentScorecard", "DropboxSync"
+    "SearchFeedback", "DocumentScorecard", "DropboxSync"
 ]

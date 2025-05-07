@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 import logging
 import traceback
-from src.catalog.models import KeywordTaxonomy, KeywordSynonym, DocumentKeyword
+from src.catalog.models import KeywordTaxonomy, KeywordSynonym, LLMKeyword
 from src.catalog import db
 
 logger = logging.getLogger(__name__)
@@ -464,10 +464,10 @@ class LLMResponseParser:
             }
 
     @staticmethod
-    def parse_hierarchical_keywords(data: Dict[str, Any], document_id: int) -> List[DocumentKeyword]:
+    def parse_hierarchical_keywords(data: Dict[str, Any], document_id: int) -> List[LLMKeyword]:
         """
         Parse hierarchical keywords and map to taxonomy.
-        Returns a list of DocumentKeyword objects ready to be added to the database.
+        Returns a list of LLMKeyword objects ready to be added to the database.
         """
         try:
             # Get hierarchical keywords from response
@@ -558,7 +558,7 @@ class LLMResponseParser:
                                     db.session.add(synonym)
 
                     # Create document keyword association
-                    doc_keyword = DocumentKeyword(
+                    doc_keyword = LLMKeyword(
                         document_id=document_id,
                         taxonomy_id=taxonomy_term.id,
                         relevance_score=relevance_score
@@ -572,7 +572,7 @@ class LLMResponseParser:
                     continue
 
             logger.info(
-                f"Successfully parsed {len(document_keywords)} document keywords")
+                f"Successfully parsed {len(LLMKeyword)} LLMkeywords")
             return document_keywords
 
         except Exception as e:

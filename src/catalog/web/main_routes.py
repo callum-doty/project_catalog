@@ -3,13 +3,14 @@
 from flask import Blueprint, render_template, request, session, flash, redirect, url_for, jsonify, current_app
 from werkzeug.utils import secure_filename
 import os
+import logging
 import src.catalog
 from sqlalchemy.orm import joinedload
 from datetime import datetime
 from src.catalog.services.storage_service import MinIOStorage
 from src.catalog import db
 from src.catalog.models import Document, LLMAnalysis, LLMKeyword, Classification, DesignElement, ExtractedText, DropboxSync, Entity, CommunicationFocus
-from src.catalog.models import KeywordTaxonomy, KeywordSynonym, DocumentKeyword
+from src.catalog.models import KeywordTaxonomy, KeywordSynonym
 from sqlalchemy import or_, func, desc, case, extract
 from src.catalog.services.preview_service import PreviewService
 from src.catalog.services.dropbox_service import DropboxService
@@ -33,6 +34,7 @@ from src.catalog.constants import CACHE_TIMEOUTS
 
 
 main_routes = Blueprint('main_routes', __name__)
+logger = logging.getLogger(__name__)
 storage = MinIOStorage()
 preview_service = PreviewService()
 search_times = []
@@ -308,36 +310,33 @@ def search_documents():
     return redirect(url_for('search_routes.search_documents', **request.args))
 
 
-# Helper function to get hierarchical keywords for a document
 @cache.memoize(timeout=300)
 def get_document_hierarchical_keywords(document_id):
     """Get hierarchical keywords for a document"""
     try:
-        from catalog.models import DocumentKeyword, KeywordTaxonomy
-
         keywords = db.session.query(
-            DocumentKeyword, KeywordTaxonomy
+            LLMKeyword, KeywordTaxonomy
         ).join(
-            KeywordTaxonomy, DocumentKeyword.taxonomy_id == KeywordTaxonomy.id
+            KeywordTaxonomy, LLMKeyword.taxonomy_id == KeywordTaxonomy.id
+        ).join(
+            LLMAnalysis, LLMKeyword.llm_analysis_id == LLMAnalysis.id
         ).filter(
-            DocumentKeyword.document_id == document_id
+            LLMAnalysis.document_id == document_id
         ).all()
 
-        # Format keywords for display
         result = []
-        for doc_kw, taxonomy in keywords:
+        for llm_kw, taxonomy in keywords:
             result.append({
                 'id': taxonomy.id,
                 'term': taxonomy.term,
                 'primary_category': taxonomy.primary_category,
                 'subcategory': taxonomy.subcategory,
-                'relevance_score': doc_kw.relevance_score
+                'relevance_score': llm_kw.relevance_score
             })
 
         return result
     except Exception as e:
-        current_app.logger.error(
-            f"Error getting hierarchical keywords: {str(e)}")
+        logger.error(f"Error getting hierarchical keywords: {str(e)}")
         return []
 
 
@@ -345,13 +344,15 @@ def get_document_hierarchical_keywords(document_id):
 def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None):
     """Generate taxonomy facets for sidebar filtering"""
     try:
+        logger = current_app.logger
         # Create a CTE for documents that have keywords
         docs_with_keywords = db.session.query(
-            DocumentKeyword.taxonomy_id,
-            func.count(DocumentKeyword.document_id.distinct()
-                       ).label('doc_count')
+            LLMKeyword.taxonomy_id,
+            func.count(LLMAnalysis.document_id.distinct()).label('doc_count')
+        ).join(
+            LLMAnalysis, LLMKeyword.llm_analysis_id == LLMAnalysis.id
         ).group_by(
-            DocumentKeyword.taxonomy_id
+            LLMKeyword.taxonomy_id
         ).cte('docs_with_keywords')
 
         # Get primary categories with counts
@@ -375,7 +376,9 @@ def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None):
             ).filter(
                 KeywordTaxonomy.primary_category == selected_primary
             ).join(
-                DocumentKeyword, KeywordTaxonomy.id == DocumentKeyword.taxonomy_id
+                LLMKeyword, KeywordTaxonomy.id == LLMKeyword.taxonomy_id
+            ).join(
+                LLMAnalysis, LLMKeyword.llm_analysis_id == LLMAnalysis.id
             ).group_by(
                 KeywordTaxonomy.subcategory
             ).order_by(
@@ -397,7 +400,7 @@ def generate_taxonomy_facets(selected_primary=None, selected_subcategory=None):
 
         return result
     except Exception as e:
-        current_app.logger.error(f"Error generating taxonomy facets: {str(e)}")
+        logger.error(f"Error generating taxonomy facets: {str(e)}")
         return {'primary_categories': [], 'subcategories': []}
 
 
@@ -698,16 +701,16 @@ def get_document_hierarchical_keywords_bulk(document_ids):
     """Efficiently get hierarchical keywords for multiple documents at once"""
     try:
         keywords_data = db.session.query(
-            DocumentKeyword.document_id,
+            LLMKeyword.document_id,
             KeywordTaxonomy.id,
             KeywordTaxonomy.term,
             KeywordTaxonomy.primary_category,
             KeywordTaxonomy.subcategory,
-            DocumentKeyword.relevance_score
+            LLMKeyword.relevance_score
         ).join(
-            KeywordTaxonomy, DocumentKeyword.taxonomy_id == KeywordTaxonomy.id
+            KeywordTaxonomy, LLMKeyword.taxonomy_id == KeywordTaxonomy.id
         ).filter(
-            DocumentKeyword.document_id.in_(document_ids)
+            LLMKeyword.document_id.in_(document_ids)
         ).all()
 
         results = {doc_id: [] for doc_id in document_ids}

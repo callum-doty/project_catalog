@@ -8,7 +8,7 @@ from sqlalchemy.orm import joinedload
 from src.catalog import db, cache
 
 from src.catalog.models import Document, LLMAnalysis, ExtractedText, DesignElement
-from src.catalog.models import KeywordTaxonomy, KeywordSynonym, DocumentKeyword, LLMKeyword
+from src.catalog.models import KeywordTaxonomy, KeywordSynonym, LLMKeyword
 from src.catalog.constants import CACHE_TIMEOUTS, DEFAULTS, SEARCH_TYPES, DOCUMENT_STATUSES
 from src.catalog.services.preview_service import PreviewService
 from src.catalog.services.embeddings_service import EmbeddingsService
@@ -504,20 +504,20 @@ class SearchService:
         try:
             # Create a CTE for documents that have keywords with improved performance
             docs_with_keywords = db.session.query(
-                DocumentKeyword.taxonomy_id,
-                func.count(DocumentKeyword.document_id.distinct()
+                LLMKeyword.taxonomy_id,
+                func.count(LLMKeyword.document_id.distinct()
                            ).label('doc_count')
             ).group_by(
-                DocumentKeyword.taxonomy_id
+                LLMKeyword.taxonomy_id
             ).cte('docs_with_keywords')
 
             # Get primary categories with counts using a more efficient query
             primary_categories = db.session.query(
                 KeywordTaxonomy.primary_category,
-                func.count(DocumentKeyword.document_id.distinct()
+                func.count(LLMKeyword.document_id.distinct()
                            ).label('count')
             ).join(
-                DocumentKeyword, KeywordTaxonomy.id == DocumentKeyword.taxonomy_id
+                LLMKeyword, KeywordTaxonomy.id == LLMKeyword.taxonomy_id
             ).group_by(
                 KeywordTaxonomy.primary_category
             ).order_by(
@@ -529,12 +529,12 @@ class SearchService:
             if selected_primary:
                 subcategories = db.session.query(
                     KeywordTaxonomy.subcategory,
-                    func.count(DocumentKeyword.document_id.distinct()).label(
+                    func.count(LLMKeyword.document_id.distinct()).label(
                         'count')
                 ).filter(
                     KeywordTaxonomy.primary_category == selected_primary
                 ).join(
-                    DocumentKeyword, KeywordTaxonomy.id == DocumentKeyword.taxonomy_id
+                    LLMKeyword, KeywordTaxonomy.id == LLMKeyword.taxonomy_id
                 ).group_by(
                     KeywordTaxonomy.subcategory
                 ).order_by(
@@ -546,13 +546,13 @@ class SearchService:
             if selected_primary and selected_subcategory:
                 terms = db.session.query(
                     KeywordTaxonomy.term,
-                    func.count(DocumentKeyword.document_id.distinct()).label(
+                    func.count(LLMKeyword.document_id.distinct()).label(
                         'count')
                 ).filter(
                     KeywordTaxonomy.primary_category == selected_primary,
                     KeywordTaxonomy.subcategory == selected_subcategory
                 ).join(
-                    DocumentKeyword, KeywordTaxonomy.id == DocumentKeyword.taxonomy_id
+                    LLMKeyword, KeywordTaxonomy.id == LLMKeyword.taxonomy_id
                 ).group_by(
                     KeywordTaxonomy.term
                 ).order_by(
@@ -645,8 +645,8 @@ class SearchService:
         # Apply taxonomy filters with improved performance
         if primary_category:
             # Use a subquery to get document IDs that match the taxonomy criteria
-            taxonomy_query = db.session.query(DocumentKeyword.document_id).join(
-                KeywordTaxonomy, DocumentKeyword.taxonomy_id == KeywordTaxonomy.id
+            taxonomy_query = db.session.query(LLMKeyword.document_id).join(
+                KeywordTaxonomy, LLMKeyword.taxonomy_id == KeywordTaxonomy.id
             ).filter(
                 KeywordTaxonomy.primary_category == primary_category
             )

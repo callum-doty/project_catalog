@@ -10,7 +10,7 @@ from src.catalog.models import (
     Document, LLMAnalysis, ExtractedText, DesignElement,
     Classification, Entity, CommunicationFocus, LLMKeyword
 )
-from src.catalog.models import DocumentKeyword, KeywordTaxonomy, KeywordSynonym
+from src.catalog.models import LLMKeyword, KeywordTaxonomy, KeywordSynonym
 from src.catalog.constants import DOCUMENT_STATUSES
 from typing import List, Dict, Any, Optional, Union, Tuple
 
@@ -168,21 +168,15 @@ def filter_by_location(query, location=None):
 def filter_by_taxonomy(query, primary_category=None, subcategory=None, specific_term=None):
     """
     Filter documents by taxonomy terms
-
-    Args:
-        query: Base SQLAlchemy query
-        primary_category: Primary category to filter by
-        subcategory: Subcategory to filter by (requires primary_category)
-        specific_term: Specific term to filter by (requires primary_category and subcategory)
-
-    Returns:
-        Filtered SQLAlchemy query
     """
     if not primary_category:
         return query
 
-    taxonomy_query = db.session.query(DocumentKeyword.document_id).join(
-        KeywordTaxonomy, DocumentKeyword.taxonomy_id == KeywordTaxonomy.id
+    # Modified to use LLMKeyword via LLMAnalysis
+    taxonomy_query = db.session.query(LLMAnalysis.document_id).join(
+        LLMKeyword, LLMKeyword.llm_analysis_id == LLMAnalysis.id
+    ).join(
+        KeywordTaxonomy, LLMKeyword.taxonomy_id == KeywordTaxonomy.id
     ).filter(
         KeywordTaxonomy.primary_category == primary_category
     )
