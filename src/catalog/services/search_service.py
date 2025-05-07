@@ -491,95 +491,99 @@ class SearchService:
     @cache.memoize(timeout=CACHE_TIMEOUTS['TAXONOMY'])
     def generate_taxonomy_facets(self, selected_primary=None, selected_subcategory=None, selected_term=None):
         """
-        Generate taxonomy facets for sidebar filtering with terms
-
-        Args:
-            selected_primary: Selected primary category (optional)
-            selected_subcategory: Selected subcategory (optional)
-            selected_term: Selected specific term (optional)
-
-        Returns:
-            Dictionary with facet information
+        Generate taxonomy facets for sidebar filtering with terms using LLMKeywords
         """
         try:
-            # Create a CTE for documents that have keywords with improved performance
-            docs_with_keywords = db.session.query(
-                LLMKeyword.taxonomy_id,
-                func.count(LLMKeyword.document_id.distinct()
-                           ).label('doc_count')
-            ).group_by(
-                LLMKeyword.taxonomy_id
-            ).cte('docs_with_keywords')
-
-            # Get primary categories with counts using a more efficient query
+            # Query for primary categories through LLMKeyword relationship
             primary_categories = db.session.query(
                 KeywordTaxonomy.primary_category,
-                func.count(LLMKeyword.document_id.distinct()
-                           ).label('count')
+                func.count(LLMKeyword.id.distinct()).label('count')
             ).join(
                 LLMKeyword, KeywordTaxonomy.id == LLMKeyword.taxonomy_id
             ).group_by(
                 KeywordTaxonomy.primary_category
+            ).filter(
+                KeywordTaxonomy.primary_category.isnot(
+                    None)  # Ensure non-null values
             ).order_by(
                 KeywordTaxonomy.primary_category
             ).all()
 
-            # If a primary category is selected, get subcategories with improved query
+            # Log for debugging
+            self.logger.info(
+                f"Found {len(primary_categories)} primary categories from LLMKeywords")
+
+            # If no results, try direct query on KeywordTaxonomy without joins
+            if not primary_categories:
+                self.logger.warning(
+                    "No primary categories found with LLMKeyword join, trying direct query")
+                primary_categories = db.session.query(
+                    KeywordTaxonomy.primary_category,
+                    func.count(KeywordTaxonomy.id).label('count')
+                ).filter(
+                    KeywordTaxonomy.primary_category.isnot(None)
+                ).group_by(
+                    KeywordTaxonomy.primary_category
+                ).order_by(
+                    KeywordTaxonomy.primary_category
+                ).all()
+
+                self.logger.info(
+                    f"Direct query found {len(primary_categories)} primary categories")
+
+            # Get subcategories if primary category selected
             subcategories = []
             if selected_primary:
                 subcategories = db.session.query(
                     KeywordTaxonomy.subcategory,
-                    func.count(LLMKeyword.document_id.distinct()).label(
-                        'count')
-                ).filter(
-                    KeywordTaxonomy.primary_category == selected_primary
+                    func.count(LLMKeyword.id.distinct()).label('count')
                 ).join(
                     LLMKeyword, KeywordTaxonomy.id == LLMKeyword.taxonomy_id
+                ).filter(
+                    KeywordTaxonomy.primary_category == selected_primary,
+                    KeywordTaxonomy.subcategory.isnot(None)
                 ).group_by(
                     KeywordTaxonomy.subcategory
                 ).order_by(
                     KeywordTaxonomy.subcategory
                 ).all()
 
-            # If both primary category and subcategory are selected, get specific terms
+            # Get terms if both primary and subcategory selected
             terms = []
             if selected_primary and selected_subcategory:
                 terms = db.session.query(
                     KeywordTaxonomy.term,
-                    func.count(LLMKeyword.document_id.distinct()).label(
-                        'count')
+                    func.count(LLMKeyword.id.distinct()).label('count')
+                ).join(
+                    LLMKeyword, KeywordTaxonomy.id == LLMKeyword.taxonomy_id
                 ).filter(
                     KeywordTaxonomy.primary_category == selected_primary,
                     KeywordTaxonomy.subcategory == selected_subcategory
-                ).join(
-                    LLMKeyword, KeywordTaxonomy.id == LLMKeyword.taxonomy_id
                 ).group_by(
                     KeywordTaxonomy.term
                 ).order_by(
                     KeywordTaxonomy.term
                 ).all()
 
-            # Format results with additional metadata
+            # Format results
             result = {
                 'primary_categories': [
                     {
                         'name': cat,
                         'count': count,
-                        'selected': cat == selected_primary,
-                        # Add metadata about subcategories
-                        'has_subcategories': any(s[0] for s in subcategories if s[0])
+                        'selected': cat == selected_primary
                     }
-                    for cat, count in primary_categories
+                    # Skip empty categories
+                    for cat, count in primary_categories if cat
                 ],
                 'subcategories': [
                     {
                         'name': subcat,
                         'count': count,
-                        'selected': subcat == selected_subcategory,
-                        # Add metadata about terms
-                        'has_terms': any(t[0] for t in terms if t[0])
+                        'selected': subcat == selected_subcategory
                     }
-                    for subcat, count in subcategories
+                    # Skip empty subcategories
+                    for subcat, count in subcategories if subcat
                 ] if selected_primary else [],
                 'terms': [
                     {
@@ -587,13 +591,15 @@ class SearchService:
                         'count': count,
                         'selected': term == selected_term
                     }
-                    for term, count in terms
+                    for term, count in terms if term  # Skip empty terms
                 ] if selected_primary and selected_subcategory else []
             }
 
             return result
         except Exception as e:
-            self.logger.error(f"Error generating taxonomy facets: {str(e)}")
+            self.logger.error(
+                f"Error generating taxonomy facets: {str(e)}", exc_info=True)
+            # Return empty but properly structured result on error
             return {'primary_categories': [], 'subcategories': [], 'terms': []}
 
     def _apply_filters(self, query, **filters):

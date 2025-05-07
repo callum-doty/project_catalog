@@ -1,3 +1,4 @@
+// Updated search.js with fixed taxonomy filtering functionality
 document.addEventListener('DOMContentLoaded', function() {
     // Handle missing previews gracefully
     const previewImages = document.querySelectorAll('.preview-image');
@@ -22,6 +23,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Setup AJAX pagination links
     setupAjaxPagination();
+    
+    // Initialize taxonomy filter elements
+    initializeTaxonomyFilters();
 });
 
 function setupSearchForm(searchForm, sortBySelect, sortDirElement) {
@@ -46,6 +50,7 @@ function executeSearch(query, sortBy, sortDir) {
     const urlParams = new URLSearchParams(window.location.search);
     const primaryCategory = urlParams.get('primary_category') || '';
     const subcategory = urlParams.get('subcategory') || '';
+    const specific_term = urlParams.get('specific_term') || '';
     const filterType = urlParams.get('filter_type') || '';
     const filterYear = urlParams.get('filter_year') || '';
     const filterLocation = urlParams.get('filter_location') || '';
@@ -55,6 +60,7 @@ function executeSearch(query, sortBy, sortDir) {
         `&sort_by=${sortBy}&sort_dir=${sortDir}` +
         (primaryCategory ? `&primary_category=${encodeURIComponent(primaryCategory)}` : '') +
         (subcategory ? `&subcategory=${encodeURIComponent(subcategory)}` : '') +
+        (specific_term ? `&specific_term=${encodeURIComponent(specific_term)}` : '') +
         (filterType ? `&filter_type=${encodeURIComponent(filterType)}` : '') +
         (filterYear ? `&filter_year=${encodeURIComponent(filterYear)}` : '') +
         (filterLocation ? `&filter_location=${encodeURIComponent(filterLocation)}` : '');
@@ -423,6 +429,7 @@ function updatePagination(pagination) {
         const sortDir = urlParams.get('sort_dir') || 'desc';
         const primaryCategory = urlParams.get('primary_category') || '';
         const subcategory = urlParams.get('subcategory') || '';
+        const specific_term = urlParams.get('specific_term') || '';
         const filterType = urlParams.get('filter_type') || '';
         const filterYear = urlParams.get('filter_year') || '';
         const filterLocation = urlParams.get('filter_location') || '';
@@ -439,6 +446,7 @@ function updatePagination(pagination) {
                 `&per_page=${pagination.per_page}&sort_by=${sortBy}&sort_dir=${sortDir}` +
                 `${primaryCategory ? '&primary_category=' + encodeURIComponent(primaryCategory) : ''}` +
                 `${subcategory ? '&subcategory=' + encodeURIComponent(subcategory) : ''}` +
+                `${specific_term ? '&specific_term=' + encodeURIComponent(specific_term) : ''}` +
                 `${filterType ? '&filter_type=' + encodeURIComponent(filterType) : ''}` +
                 `${filterYear ? '&filter_year=' + encodeURIComponent(filterYear) : ''}` +
                 `${filterLocation ? '&filter_location=' + encodeURIComponent(filterLocation) : ''}`;
@@ -460,6 +468,7 @@ function updatePagination(pagination) {
                 `&per_page=${pagination.per_page}&sort_by=${sortBy}&sort_dir=${sortDir}` +
                 `${primaryCategory ? '&primary_category=' + encodeURIComponent(primaryCategory) : ''}` +
                 `${subcategory ? '&subcategory=' + encodeURIComponent(subcategory) : ''}` +
+                `${specific_term ? '&specific_term=' + encodeURIComponent(specific_term) : ''}` +
                 `${filterType ? '&filter_type=' + encodeURIComponent(filterType) : ''}` +
                 `${filterYear ? '&filter_year=' + encodeURIComponent(filterYear) : ''}` +
                 `${filterLocation ? '&filter_location=' + encodeURIComponent(filterLocation) : ''}`;
@@ -475,6 +484,7 @@ function updatePagination(pagination) {
                 `&per_page=${pagination.per_page}&sort_by=${sortBy}&sort_dir=${sortDir}` +
                 `${primaryCategory ? '&primary_category=' + encodeURIComponent(primaryCategory) : ''}` +
                 `${subcategory ? '&subcategory=' + encodeURIComponent(subcategory) : ''}` +
+                `${specific_term ? '&specific_term=' + encodeURIComponent(specific_term) : ''}` +
                 `${filterType ? '&filter_type=' + encodeURIComponent(filterType) : ''}` +
                 `${filterYear ? '&filter_year=' + encodeURIComponent(filterYear) : ''}` +
                 `${filterLocation ? '&filter_location=' + encodeURIComponent(filterLocation) : ''}`;
@@ -496,50 +506,65 @@ function updatePagination(pagination) {
     }
 }
 
-// Taxonomy Filter Functions
-function updateTaxonomyFilter(type, value) {
-    // Log the function call for debugging
-    console.log(`Updating taxonomy filter: ${type} = ${value}`);
+// Initialize all taxonomy filter elements
+function initializeTaxonomyFilters() {
+    // Setup click handlers for taxonomy filter elements using event delegation
+    document.addEventListener('click', function(e) {
+        // Find closest facet-item if any
+        const facetItem = e.target.closest('.facet-item');
+        if (!facetItem) return;
+        
+        // Get the type and name
+        let filterType = '';
+        let filterValue = '';
+        
+        // Check parent container to determine the type
+        const parentContainer = facetItem.closest('.facet-primary-categories, .facet-subcategories, .facet-terms');
+        if (!parentContainer) return;
+        
+        if (parentContainer.classList.contains('facet-primary-categories')) {
+            filterType = 'primary_category';
+        } else if (parentContainer.classList.contains('facet-subcategories')) {
+            filterType = 'subcategory';
+        } else if (parentContainer.classList.contains('facet-terms')) {
+            filterType = 'specific_term';
+        }
+        
+        // Get the value from the text content of the first span
+        const nameSpan = facetItem.querySelector('span:first-child');
+        if (nameSpan) {
+            filterValue = nameSpan.textContent.trim();
+        }
+        
+        if (filterType && filterValue) {
+            updateTaxonomyFilter(filterType, filterValue);
+        }
+    });
     
-    const urlParams = new URLSearchParams(window.location.search);
-
-    // Update the URL parameters
-    urlParams.set(type, value);
-
-    // If changing primary category, remove subcategory and specific_term
-    if (type === "primary_category") {
-        urlParams.delete("subcategory");
-        urlParams.delete("specific_term");
+    // Set up the clear filters button
+    const clearFiltersBtn = document.querySelector('.clear-taxonomy-filters');
+    if (clearFiltersBtn) {
+        clearFiltersBtn.addEventListener('click', clearTaxonomyFilters);
+        
+        // Check if we should show it
+        const urlParams = new URLSearchParams(window.location.search);
+        const primaryCategory = urlParams.get('primary_category');
+        const subcategory = urlParams.get('subcategory');
+        const specificTerm = urlParams.get('specific_term');
+        
+        if (primaryCategory || subcategory || specificTerm) {
+            clearFiltersBtn.style.display = 'block';
+        } else {
+            clearFiltersBtn.style.display = 'none';
+        }
     }
-
-    // If changing subcategory, remove specific_term
-    if (type === "subcategory") {
-        urlParams.delete("specific_term");
-    }
-
-    // Reset to page 1
-    urlParams.set("page", "1");
-
-    // Update the URL and refresh
-    window.location.href = `${window.location.pathname}?${urlParams.toString()}`;
 }
 
-function clearTaxonomyFilters() {
-    console.log("Clearing all taxonomy filters");
-    const urlParams = new URLSearchParams(window.location.search);
-    urlParams.delete("primary_category");
-    urlParams.delete("subcategory");
-    urlParams.delete("specific_term");
-    
-    // Reset to page 1
-    urlParams.set("page", "1");
-    
-    window.location.href = `${window.location.pathname}?${urlParams.toString()}`;
-}
-
-// Function to update taxonomy facets display in search.js
+// Function to update taxonomy facets display
 function updateTaxonomyFacets(facets) {
     try {
+        console.log("Updating taxonomy facets:", facets);
+        
         // Primary Categories
         const primaryCategoriesContainer = document.querySelector('.facet-primary-categories');
         if (primaryCategoriesContainer && facets.primary_categories) {
@@ -621,28 +646,21 @@ function updateTaxonomyFacets(facets) {
     }
 }
 
-// Make sure the functions are available globally
-window.updateTaxonomyFilter = updateTaxonomyFilter;
+// Clear all taxonomy filters
+function clearTaxonomyFilters() {
+    console.log("Clearing all taxonomy filters");
+    const urlParams = new URLSearchParams(window.location.search);
+    urlParams.delete("primary_category");
+    urlParams.delete("subcategory");
+    urlParams.delete("specific_term");
+    
+    // Reset to page 1
+    urlParams.set("page", "1");
+    
+    window.location.href = `${window.location.pathname}?${urlParams.toString()}`;
+}
+
+// Make these functions available globally
+window.updateTaxonomyFilter = updateTaxonomyFilter; 
 window.clearTaxonomyFilters = clearTaxonomyFilters;
 window.updateTaxonomyFacets = updateTaxonomyFacets;
-
-// Initialize when document is ready
-document.addEventListener('DOMContentLoaded', function() {
-    // Get URL parameters to initialize selected filters
-    const urlParams = new URLSearchParams(window.location.search);
-    const primaryCategory = urlParams.get('primary_category');
-    const subcategory = urlParams.get('subcategory');
-    const specificTerm = urlParams.get('specific_term');
-    
-    console.log(`Initializing taxonomy filters: primary=${primaryCategory}, sub=${subcategory}, term=${specificTerm}`);
-    
-    // Update clear filters button visibility
-    const clearFiltersBtn = document.querySelector('.clear-taxonomy-filters');
-    if (clearFiltersBtn) {
-        if (primaryCategory || subcategory || specificTerm) {
-            clearFiltersBtn.style.display = 'block';
-        } else {
-            clearFiltersBtn.style.display = 'none';
-        }
-    }
-});

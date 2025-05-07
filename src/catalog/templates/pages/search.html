@@ -39,13 +39,15 @@
       <div class="bg-white rounded-lg shadow-md p-4 mb-4 filter-by-category">
         <h3 class="text-lg font-medium mb-3">Filter by Category</h3>
 
-        <!-- Primary Categories -->
+        <!-- Primary Categories Section -->
         <div class="mb-4">
           <h4 class="text-sm font-medium text-gray-700 mb-2">
             Primary Categories
           </h4>
           <div class="space-y-1 facet-primary-categories">
-            {% for category in taxonomy_facets.primary_categories %}
+            {% if taxonomy_facets and taxonomy_facets.primary_categories and
+            taxonomy_facets.primary_categories|length > 0 %} {% for category in
+            taxonomy_facets.primary_categories %}
             <div
               class="facet-item {% if category.selected %}selected{% endif %}"
               onclick="updateTaxonomyFilter('primary_category', '{{ category.name }}')"
@@ -53,7 +55,9 @@
               <span>{{ category.name }}</span>
               <span class="text-xs text-gray-500">({{ category.count }})</span>
             </div>
-            {% endfor %}
+            {% endfor %} {% else %}
+            <div class="text-sm text-gray-500">No categories available</div>
+            {% endif %}
           </div>
         </div>
 
