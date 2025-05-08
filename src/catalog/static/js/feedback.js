@@ -80,12 +80,8 @@ document.addEventListener('DOMContentLoaded', function() {
       
       console.log('Submitting feedback:', feedbackData);
       
-      // Determine the correct URL based on the current path
-      // If we're on a search page, use the search prefix
-      let apiUrl = '/api/search-feedback';
-      if (window.location.pathname.startsWith('/search')) {
-        apiUrl = '/search/api/search-feedback';
-      }
+      // FIXED: Always use the root endpoint for feedback
+      const apiUrl = '/api/search-feedback';
       
       console.log('Using API URL:', apiUrl);
       

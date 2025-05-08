@@ -244,18 +244,3 @@ def related_taxonomy_terms(term_id):
     except Exception as e:
         current_app.logger.error(f"Error getting related terms: {str(e)}")
         return jsonify([]), 500
-
-
-@search_routes.route('/api/search-feedback', methods=['POST'])
-def submit_search_feedback():
-    """API endpoint to submit search result feedback"""
-    try:
-        # Use search service to handle feedback
-        feedback_result = search_service.record_search_feedback(request.json)
-        return jsonify(feedback_result)
-    except Exception as e:
-        current_app.logger.error(f"Error recording search feedback: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': f'Error: {str(e)}'
-        }), 500

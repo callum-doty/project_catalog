@@ -1,5 +1,6 @@
 import logging
 import time
+import datetime
 from typing import List, Dict, Any, Optional, Set, Union, Tuple
 
 from sqlalchemy import or_, func, desc, asc, case, text
@@ -1004,25 +1005,54 @@ class SearchService:
             Result dictionary
         """
         try:
+            # Add debug logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Processing feedback data: {data}")
+
             # Validate required fields
-            if not data.get('search_query') or not data.get('document_id') or not data.get('feedback_type'):
+            if 'document_id' not in data or not data['document_id']:
+                logger.warning("Missing document_id in feedback data")
                 return {
                     'status': 'error',
-                    'message': 'Missing required fields'
+                    'message': 'Missing document ID'
+                }
+
+            if 'feedback_type' not in data or not data['feedback_type']:
+                logger.warning("Missing feedback_type in feedback data")
+                return {
+                    'status': 'error',
+                    'message': 'Missing feedback type'
+                }
+
+            # Get document to verify it exists
+            document = Document.query.get(data['document_id'])
+            if not document:
+                logger.warning(f"Document not found: {data['document_id']}")
+                return {
+                    'status': 'error',
+                    'message': f"Document with ID {data['document_id']} not found"
                 }
 
             # Create feedback record
-            from catalog.models import SearchFeedback
+            from src.catalog.models import SearchFeedback
 
             feedback = SearchFeedback(
-                search_query=data.get('search_query'),
-                document_id=data.get('document_id'),
-                feedback_type=data.get('feedback_type'),
-                user_comment=data.get('comment', '')
+                # Use empty string if not provided
+                search_query=data.get('search_query', ''),
+                document_id=data['document_id'],
+                feedback_type=data['feedback_type'],
+                # Use empty string if not provided
+                user_comment=data.get('comment', ''),
+                feedback_date=datetime.utcnow()  # Make sure to set the date
             )
+
+            logger.info(f"Creating feedback record: {feedback.__dict__}")
 
             db.session.add(feedback)
             db.session.commit()
+
+            logger.info(
+                f"Successfully recorded feedback with ID: {feedback.id}")
 
             return {
                 'status': 'success',
@@ -1030,5 +1060,10 @@ class SearchService:
                 'feedback_id': feedback.id
             }
         except Exception as e:
-            self.logger.error(f"Error recording search feedback: {str(e)}")
-            raise
+            logger.error(
+                f"Error recording search feedback: {str(e)}", exc_info=True)
+            db.session.rollback()
+            return {
+                'status': 'error',
+                'message': f'Database error: {str(e)}'
+            }

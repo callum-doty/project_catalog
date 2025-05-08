@@ -924,22 +924,182 @@ def generate_missing_scorecards():
 def submit_search_feedback():
     """API endpoint to submit search result feedback"""
     try:
-        # Import here to avoid circular imports
-        from src.catalog.services.search_service import SearchService
-        search_service = SearchService()
+        # Import SearchFeedback model directly here
+        from src.catalog.models import SearchFeedback
+        from datetime import datetime
 
         # Debug logging
         current_app.logger.info(f"Received feedback data: {request.json}")
 
-        # Use search service to handle feedback
-        feedback_result = search_service.record_search_feedback(request.json)
+        # Validate required fields
+        if not request.json:
+            return jsonify({
+                'status': 'error',
+                'message': 'No data provided'
+            }), 400
 
-        current_app.logger.info(f"Feedback recorded: {feedback_result}")
-        return jsonify(feedback_result)
+        data = request.json
+
+        # Check required fields
+        if 'document_id' not in data or not data['document_id']:
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing document ID'
+            }), 400
+
+        if 'feedback_type' not in data or not data['feedback_type']:
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing feedback type'
+            }), 400
+
+        # Create feedback record directly
+        feedback = SearchFeedback(
+            search_query=data.get('search_query', ''),
+            document_id=data['document_id'],
+            feedback_type=data['feedback_type'],
+            user_comment=data.get('comment', ''),
+            feedback_date=datetime.utcnow()
+        )
+
+        # Log the feedback object before adding to session
+        current_app.logger.info(
+            f"Creating feedback: {feedback.document_id} - {feedback.feedback_type}")
+
+        db.session.add(feedback)
+        db.session.commit()
+
+        current_app.logger.info(
+            f"Feedback recorded successfully with ID: {feedback.id}")
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Feedback recorded successfully',
+            'feedback_id': feedback.id
+        })
+
     except Exception as e:
         current_app.logger.error(
             f"Error recording search feedback: {str(e)}", exc_info=True)
+        db.session.rollback()
         return jsonify({
             'status': 'error',
             'message': f'Error: {str(e)}'
+        }), 500
+
+
+@main_routes.route('/api/admin/feedback', methods=['GET'])
+def get_search_feedback():
+    """API endpoint to retrieve search feedback data for admin dashboard"""
+    try:
+        # Import necessary models
+        from src.catalog.models import SearchFeedback, Document
+
+        # Get pagination parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+
+        # Get optional filter parameters
+        feedback_type = request.args.get('type', None)
+        start_date = request.args.get('start_date', None)
+        end_date = request.args.get('end_date', None)
+
+        # Build base query with join to get document filenames
+        query = db.session.query(
+            SearchFeedback, Document.filename
+        ).outerjoin(
+            Document, SearchFeedback.document_id == Document.id
+        )
+
+        # Apply filters if provided
+        if feedback_type:
+            query = query.filter(SearchFeedback.feedback_type == feedback_type)
+
+        if start_date:
+            try:
+                start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
+                query = query.filter(
+                    SearchFeedback.feedback_date >= start_datetime)
+            except ValueError:
+                # Invalid date format, ignore this filter
+                pass
+
+        if end_date:
+            try:
+                end_datetime = datetime.strptime(end_date, '%Y-%m-%d')
+                # Add one day to include the end date fully
+                end_datetime = end_datetime + timedelta(days=1)
+                query = query.filter(
+                    SearchFeedback.feedback_date < end_datetime)
+            except ValueError:
+                # Invalid date format, ignore this filter
+                pass
+
+        # Order by most recent first
+        query = query.order_by(SearchFeedback.feedback_date.desc())
+
+        # Get total count for pagination
+        total_count = query.count()
+
+        # Apply pagination
+        paginated_query = query.offset((page - 1) * per_page).limit(per_page)
+
+        # Execute query
+        results = paginated_query.all()
+
+        # Format the results
+        feedback_list = []
+        for feedback, filename in results:
+            feedback_list.append({
+                'id': feedback.id,
+                'document_id': feedback.document_id,
+                'filename': filename or "Unknown Document",
+                'search_query': feedback.search_query or "",
+                'feedback_type': feedback.feedback_type,
+                'user_comment': feedback.user_comment or "",
+                'feedback_date': feedback.feedback_date.strftime('%Y-%m-%d %H:%M:%S') if feedback.feedback_date else None
+            })
+
+        # Calculate pagination info
+        total_pages = (total_count + per_page -
+                       1) // per_page if per_page > 0 else 0
+        pagination = {
+            'page': page,
+            'per_page': per_page,
+            'total': total_count,
+            'pages': total_pages,
+            'has_prev': page > 1,
+            'has_next': page < total_pages,
+            'prev_page': page - 1 if page > 1 else None,
+            'next_page': page + 1 if page < total_pages else None
+        }
+
+        # Get feedback type distribution for charts
+        feedback_distribution = db.session.query(
+            SearchFeedback.feedback_type,
+            func.count(SearchFeedback.id)
+        ).group_by(
+            SearchFeedback.feedback_type
+        ).all()
+
+        # Format distribution data
+        distribution = {type_name: count for type_name,
+                        count in feedback_distribution}
+
+        # Return response
+        return jsonify({
+            'success': True,
+            'data': {
+                'feedback': feedback_list,
+                'pagination': pagination,
+                'distribution': distribution
+            }
+        })
+
+    except Exception as e:
+        current_app.logger.error(
+            f"Error getting feedback data: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
         }), 500
