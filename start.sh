@@ -31,7 +31,7 @@ case $SERVICE_TYPE in
     echo "Starting web service..."
     
     # Try to run database migrations
-    FLASK_APP=src/wsgi.py python -m flask db upgrade || echo "WARNING: Database migrations failed"
+    FLASK_APP=src/wsgi.py python -m flask db upgrade
     
     # Start the Flask application with proper settings for proxies
     if [ -n "$RAILWAY_ENVIRONMENT" ]; then

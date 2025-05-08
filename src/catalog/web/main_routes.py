@@ -66,8 +66,6 @@ def password_required(f):
         return render_template('password.html')
     return decorated
 
-# Protect all routes in this blueprint
-
 
 @main_routes.before_request
 def protect_blueprint():
@@ -81,7 +79,14 @@ def protect_blueprint():
 
     # Check if authenticated
     if not session.get('authenticated'):
-        # Preserve the requested URL as 'next' parameter
+        # For AJAX requests, return a JSON error instead of redirecting
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({
+                'error': 'Authentication required',
+                'redirect': url_for('main_routes.password_check', next=request.url)
+            }), 401
+
+        # Preserve the requested URL as 'next' parameter for regular requests
         next_url = request.url
         return redirect(url_for('main_routes.password_check', next=next_url))
 

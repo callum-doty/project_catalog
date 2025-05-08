@@ -3,6 +3,48 @@
 <div
   class="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow document-card relative"
 >
+  <!-- View Document Button (Eye Icon) in top left -->
+  <div class="absolute top-2 left-2 z-10">
+    <a
+      href="{{ url_for('main_routes.view_document', filename=doc.filename) }}"
+      target="_blank"
+      rel="noopener noreferrer"
+      class="view-document-button group relative flex items-center justify-center"
+    >
+      <!-- Simple eye icon -->
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        width="24"
+        height="24"
+        class="text-gray-700"
+      >
+        <circle
+          cx="12"
+          cy="12"
+          r="3.5"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+        />
+        <path
+          d="M3 12s3.5-7 9-7 9 7 9 7-3.5 7-9 7-9-7-9-7z"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+        />
+      </svg>
+
+      <!-- Tooltip that shows on hover -->
+      <span
+        class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-xs font-medium text-white bg-gray-700 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap"
+      >
+        View document
+      </span>
+    </a>
+  </div>
+
   <!-- Feedback Button -->
   <div class="absolute top-2 right-2 z-10">
     <button
@@ -186,17 +228,7 @@
     </div>
     {% endif %}
 
-    <!-- View Document Button -->
-    <div class="mt-4">
-      <a
-        href="{{ url_for('main_routes.view_document', filename=doc.filename) }}"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="view-document-button w-full block text-center px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
-      >
-        View Document
-      </a>
-    </div>
+    <!-- Removed the View Document button from here, as it's now in the top left corner -->
   </div>
 </div>
 {% endmacro %}
