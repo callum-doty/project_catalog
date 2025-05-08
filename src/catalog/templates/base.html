@@ -29,7 +29,30 @@
         from { opacity: 0; }
         to { opacity: 1; }
       }
-      /* Add other critical styles */
+      
+      .feedback-btn {
+        transition: all 0.2s ease;
+        opacity: 0.6;
+      }
+      
+      .feedback-btn:hover {
+        opacity: 1;
+        transform: scale(1.1);
+      }
+      
+      /* Modal animation */
+      #feedbackModal {
+        transition: opacity 0.3s ease;
+      }
+      
+      #feedbackModal.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      
+      #feedbackModal:not(.hidden) {
+        opacity: 1;
+      }
     </style>
     
     <!-- Defer non-critical CSS -->
@@ -56,10 +79,57 @@
       {% endfor %} {% endif %} {% endwith %} {% block content %}{% endblock %}
     </div>
 
-    <!-- Common JavaScript -->
-    <script src="{{ url_for('static', filename='js/sync.js') }}"></script>
-
-    <!-- Page-specific JavaScript -->
+    <div id="feedbackModal" class="fixed inset-0 bg-gray-800 bg-opacity-50 z-50 flex items-center justify-center hidden">
+      <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg font-medium text-gray-900">Document Feedback</h3>
+          <button id="closeFeedbackModal" class="text-gray-400 hover:text-gray-500">
+            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        
+        <form id="feedbackForm">
+          <input type="hidden" id="feedbackDocumentId" name="document_id" value="">
+          <input type="hidden" id="feedbackQuery" name="search_query" value="">
+          
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Feedback Type</label>
+            <div class="flex space-x-4">
+              <label class="inline-flex items-center">
+                <input type="radio" name="feedback_type" value="relevant" class="h-4 w-4 text-blue-600" checked>
+                <span class="ml-2 text-sm text-gray-700">Relevant</span>
+              </label>
+              <label class="inline-flex items-center">
+                <input type="radio" name="feedback_type" value="not_relevant" class="h-4 w-4 text-blue-600">
+                <span class="ml-2 text-sm text-gray-700">Not Relevant</span>
+              </label>
+              <label class="inline-flex items-center">
+                <input type="radio" name="feedback_type" value="other" class="h-4 w-4 text-blue-600">
+                <span class="ml-2 text-sm text-gray-700">Other</span>
+              </label>
+            </div>
+          </div>
+          
+          <div class="mb-4">
+            <label for="feedbackComment" class="block text-sm font-medium text-gray-700 mb-1">Comments (Optional)</label>
+            <textarea id="feedbackComment" name="comment" rows="3" class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"></textarea>
+          </div>
+          
+          <div class="mt-5 sm:mt-6">
+            <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:text-sm">
+              Submit Feedback
+            </button>
+          </div>
+          
+          <div id="feedbackStatus" class="mt-2 text-center hidden"></div>
+        </form>
+      </div>
+    </div>
+     <!-- Common JavaScript -->
+     <script src="{{ url_for('static', filename='js/sync.js') }}"></script>
+     <script src="{{ url_for('static', filename='js/feedback.js') }}"></script>
     {% block scripts %}{% endblock %}
   </body>
 </html>

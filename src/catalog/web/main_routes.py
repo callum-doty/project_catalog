@@ -918,3 +918,28 @@ def generate_missing_scorecards():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@main_routes.route('/api/search-feedback', methods=['POST'])
+def submit_search_feedback():
+    """API endpoint to submit search result feedback"""
+    try:
+        # Import here to avoid circular imports
+        from src.catalog.services.search_service import SearchService
+        search_service = SearchService()
+
+        # Debug logging
+        current_app.logger.info(f"Received feedback data: {request.json}")
+
+        # Use search service to handle feedback
+        feedback_result = search_service.record_search_feedback(request.json)
+
+        current_app.logger.info(f"Feedback recorded: {feedback_result}")
+        return jsonify(feedback_result)
+    except Exception as e:
+        current_app.logger.error(
+            f"Error recording search feedback: {str(e)}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': f'Error: {str(e)}'
+        }), 500
