@@ -5,7 +5,7 @@ from flask_migrate import Migrate
 from flask_caching import Cache
 from flask_wtf.csrf import CSRFProtect
 import os
-
+from src.catalog.db_config import get_db_uri
 
 # Create extension instances
 db = SQLAlchemy()
@@ -60,6 +60,7 @@ def create_app():
     # Set the database configuration
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['SQLALCHEMY_DATABASE_URI'] = get_db_uri()
 
     # Create and configure the app
     template_dir = os.path.join(os.path.dirname(
