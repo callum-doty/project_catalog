@@ -17,6 +17,22 @@ csrf = CSRFProtect()
 def create_app(test_config=None):
     """Application factory pattern for Flask app"""
 
+    database_url = os.environ.get('DATABASE_URL')
+    if not database_url:
+        # Try to build it from Railway's Postgres variables
+        pg_user = os.environ.get('PGUSER', 'postgres')
+        pg_password = os.environ.get('PGPASSWORD', 'postgres')
+        pg_host = os.environ.get('PGHOST', 'localhost')
+        pg_port = os.environ.get('PGPORT', '5432')
+        pg_database = os.environ.get('PGDATABASE', 'postgres')
+
+        database_url = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_database}"
+        app.logger.warning(
+            f"DATABASE_URL was empty, using constructed URL: {database_url}")
+
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
     # Create and configure the app
     template_dir = os.path.join(os.path.dirname(
         os.path.abspath(__file__)), 'templates')

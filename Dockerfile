@@ -48,6 +48,8 @@ COPY gunicorn.conf.py start.sh /app/
 # Create necessary directories
 RUN mkdir -p /app/uploads /app/logs /app/data/documents /app/tmp
 
+RUN apt-get update && apt-get install -y bash
+
 # Set working directory
 WORKDIR /app
 
