@@ -30,8 +30,26 @@ case $SERVICE_TYPE in
   "web")
     echo "Starting web service..."
     
-    # Try to run database migrations
-    FLASK_APP=src/wsgi.py python -m flask db upgrade
+    # Wait for database to be ready
+    echo "Waiting for database connection..."
+    MAX_RETRIES=30
+    count=0
+    while [ $count -lt $MAX_RETRIES ]; do
+      count=$((count+1))
+      pg_isready -h ${DATABASE_HOST:-postgres} -p ${DATABASE_PORT:-5432} -U ${DATABASE_USER:-postgres} && break
+      echo "Retry $count/$MAX_RETRIES - database not ready yet..."
+      sleep 2
+    done
+
+    # Run migrations with better error handling
+    echo "Running database migrations..."
+    FLASK_APP=src/wsgi.py python -m flask db upgrade || {
+      echo "WARNING: Database migrations failed - checking database status..."
+      # Try to initialize database if empty
+      FLASK_APP=src/wsgi.py python -m flask db init || true
+      FLASK_APP=src/wsgi.py python -m flask db migrate || true
+      FLASK_APP=src/wsgi.py python -m flask db upgrade || true
+    }
     
     # Start the Flask application with proper settings for proxies
     if [ -n "$RAILWAY_ENVIRONMENT" ]; then
