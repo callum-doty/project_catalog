@@ -4,9 +4,30 @@
 set -e  # Exit immediately if a command exits with a non-zero status
 
 # Print environment info for debugging
-echo "Starting service with environment: SERVICE_TYPE=${SERVICE_TYPE}"
-echo "Current directory: $(pwd)"
-echo "Python version: $(python --version)"
+echo "Starting service in Railway environment"
+echo "Environment variables:"
+echo "DATABASE_URL=${DATABASE_URL}"
+
+# Fix DATABASE_URL if it contains the literal ${DATABASE_URL}
+if [[ "$DATABASE_URL" == '${DATABASE_URL}' ]]; then
+    # Try to build from individual Postgres variables
+    echo "Warning: DATABASE_URL is not properly expanded, attempting to fix..."
+    
+    # Use Railway's Postgres variables if available
+    if [[ -n "$RAILWAY_VOLUME_POSTGRESQL_DATA_EXTERNAL" ]]; then
+        # This is a heuristic to detect if Railway Postgres is linked
+        DB_USER="${PGUSER:-custom_user}"
+        DB_PASSWORD="${PGPASSWORD:-strong_password}"
+        DB_HOST="${PGHOST:-localhost}"
+        DB_PORT="${PGPORT:-5432}"
+        DB_NAME="${PGDATABASE:-catalog_db}"
+        
+        export DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+        export SQLALCHEMY_DATABASE_URI="$DATABASE_URL"
+        
+        echo "Fixed DATABASE_URL=$DATABASE_URL"
+    fi
+fi
 
 # Set secure environment variables when running on Railway
 if [ -n "$RAILWAY_ENVIRONMENT" ]; then
