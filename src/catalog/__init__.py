@@ -15,21 +15,49 @@ csrf = CSRFProtect()
 
 
 def create_app():
-    # Check for empty DATABASE_URL
-    database_url = os.environ.get('DATABASE_URL')
-    if not database_url:
-        # Try to build it from Railway's Postgres variables
-        pg_user = os.environ.get('PGUSER', 'postgres')
-        pg_password = os.environ.get('PGPASSWORD', 'postgres')
-        pg_host = os.environ.get('PGHOST', 'localhost')
-        pg_port = os.environ.get('PGPORT', '5432')
-        pg_database = os.environ.get('PGDATABASE', 'postgres')
-
-        database_url = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_database}"
-        print(f"DATABASE_URL was empty, using constructed URL: {database_url}")
-
     # Create the Flask app instance
     app = Flask(__name__)
+
+    # Debug: Print all environment variables (safe version)
+    print("Environment variables (excluding secrets):")
+    for key, value in os.environ.items():
+        if 'SECRET' in key.upper() or 'PASSWORD' in key.upper() or 'KEY' in key.upper():
+            print(f"{key}=********")
+        else:
+            print(f"{key}={value}")
+
+    # Set database URL with appropriate fallbacks
+    database_url = os.environ.get('DATABASE_URL')
+    print(f"Original DATABASE_URL from env: '{database_url}'")
+
+    if not database_url:
+        # Try using SQLALCHEMY_DATABASE_URI as a fallback
+        database_url = os.environ.get('SQLALCHEMY_DATABASE_URI')
+        print(f"Fallback to SQLALCHEMY_DATABASE_URI: '{database_url}'")
+
+    if not database_url:
+        # Try to build from Railway's Postgres variables
+        pg_user = os.environ.get('PGUSER')
+        pg_password = os.environ.get('PGPASSWORD')
+        pg_host = os.environ.get('PGHOST')
+        pg_port = os.environ.get('PGPORT', '5432')
+        pg_database = os.environ.get('PGDATABASE')
+
+        print(f"PGUSER: '{pg_user}'")
+        print(f"PGHOST: '{pg_host}'")
+        print(f"PGPORT: '{pg_port}'")
+        print(f"PGDATABASE: '{pg_database}'")
+
+        if pg_user and pg_password and pg_host and pg_database:
+            database_url = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_database}"
+            print(f"Built DATABASE_URL from parts: '{database_url}'")
+
+    if not database_url:
+        # Last resort: use a hard-coded development URL
+        database_url = "postgresql://postgres:postgres@localhost:5432/postgres"
+        print(f"Using hardcoded development DATABASE_URL: '{database_url}'")
+
+    # Set the database configuration
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 

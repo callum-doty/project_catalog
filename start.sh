@@ -3,30 +3,39 @@
 
 set -e  # Exit immediately if a command exits with a non-zero status
 
-# Print environment info for debugging
-echo "Starting service in Railway environment"
-echo "Environment variables:"
-echo "DATABASE_URL=${DATABASE_URL}"
+echo "Starting service with enhanced debugging..."
 
-# Fix DATABASE_URL if it contains the literal ${DATABASE_URL}
-if [[ "$DATABASE_URL" == '${DATABASE_URL}' ]]; then
-    # Try to build from individual Postgres variables
-    echo "Warning: DATABASE_URL is not properly expanded, attempting to fix..."
-    
-    # Use Railway's Postgres variables if available
-    if [[ -n "$RAILWAY_VOLUME_POSTGRESQL_DATA_EXTERNAL" ]]; then
-        # This is a heuristic to detect if Railway Postgres is linked
-        DB_USER="${PGUSER:-custom_user}"
-        DB_PASSWORD="${PGPASSWORD:-strong_password}"
-        DB_HOST="${PGHOST:-localhost}"
-        DB_PORT="${PGPORT:-5432}"
-        DB_NAME="${PGDATABASE:-catalog_db}"
-        
-        export DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
-        export SQLALCHEMY_DATABASE_URI="$DATABASE_URL"
-        
-        echo "Fixed DATABASE_URL=$DATABASE_URL"
-    fi
+# Use the Railway-provided postgres variables if available
+if [[ -n "$PGHOST" && -n "$PGUSER" && -n "$PGPASSWORD" && -n "$PGDATABASE" ]]; then
+    echo "Found PostgreSQL variables, setting DATABASE_URL explicitly"
+    export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT:-5432}/${PGDATABASE}"
+    export SQLALCHEMY_DATABASE_URI="$DATABASE_URL"
+    echo "Explicitly set DATABASE_URL (masked password)"
+    echo "DATABASE_URL=postgresql://${PGUSER}:********@${PGHOST}:${PGPORT:-5432}/${PGDATABASE}"
+else
+    echo "WARNING: PostgreSQL variables not found!"
+    # Set a hardcoded URL for testing/fallback
+    export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/postgres"
+    export SQLALCHEMY_DATABASE_URI="$DATABASE_URL"
+    echo "Set hardcoded fallback DATABASE_URL for testing"
+fi
+
+# Create necessary directories
+mkdir -p ./data/documents
+mkdir -p ./tmp
+export TMPDIR=$(pwd)/tmp
+
+# Try to run database migrations (but don't fail if they fail)
+echo "Running database migrations..."
+FLASK_APP=src/wsgi.py python -m flask db upgrade || echo "WARNING: Database migrations failed"
+
+# Start the Flask application with proper settings for proxies
+if [ -n "$RAILWAY_ENVIRONMENT" ]; then
+    echo "Starting with Railway proxy settings..."
+    gunicorn --bind "0.0.0.0:${PORT:-5000}" --workers=1 --timeout=120 --forwarded-allow-ips='*' src.wsgi:application
+else
+    echo "Starting with standard settings..."
+    gunicorn --bind "0.0.0.0:${PORT:-5000}" --workers=1 --timeout=120 src.wsgi:application
 fi
 
 # Set secure environment variables when running on Railway
