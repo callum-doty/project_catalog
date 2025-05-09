@@ -103,6 +103,14 @@ case $SERVICE_TYPE in
   *)
     echo "ERROR: Unknown service type '${SERVICE_TYPE}'"
     echo "Valid values are: web, worker, beat"
+    echo "Environment variables for debugging:"
+    echo "PGUSER: ${PGUSER:-not set}"
+    echo "PGPASSWORD: ${PGPASSWORD:-not set}"
+    echo "PGHOST: ${PGHOST:-not set}"
+    echo "PGPORT: ${PGPORT:-not set}"
+    echo "PGDATABASE: ${PGDATABASE:-not set}"
+    echo "DATABASE_URL: ${DATABASE_URL:-not set}"
+    echo "SQLALCHEMY_DATABASE_URI: ${SQLALCHEMY_DATABASE_URI:-not set}"
     exit 1
     ;;
 esac
