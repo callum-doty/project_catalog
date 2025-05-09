@@ -1,13 +1,13 @@
-FROM postgres:14
+FROM postgres:16
 
 # Install build dependencies for pgvector
 RUN apt-get update && apt-get install -y \
     build-essential \
     git \
-    postgresql-server-dev-14
+    postgresql-server-dev-16
 
 # Clone pgvector repository
-RUN git clone --branch v0.4.0 https://github.com/pgvector/pgvector.git /tmp/pgvector
+RUN git clone --branch v0.5.1 https://github.com/pgvector/pgvector.git /tmp/pgvector
 
 # Build and install pgvector
 RUN cd /tmp/pgvector && \
@@ -15,7 +15,7 @@ RUN cd /tmp/pgvector && \
     make install
 
 # Clean up
-RUN apt-get remove -y build-essential git postgresql-server-dev-14 && \
+RUN apt-get remove -y build-essential git postgresql-server-dev-16 && \
     apt-get autoremove -y && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/pgvector
