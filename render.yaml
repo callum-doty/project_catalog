@@ -1,4 +1,4 @@
-# Fixed render.yaml with merged services and removed extensions field
+# Fixed render.yaml with merged services, removed extensions field, and removed startCommand for Docker runtime
 services:
   # Flask Web Service
   - type: web
@@ -51,7 +51,7 @@ services:
     buildCommand: >
       chmod +x direct-start.sh
       chmod +x failsafe-start.sh
-    startCommand: ./direct-start.sh
+      chmod +x start.sh
 
   # Celery Worker Service
   - type: worker
@@ -93,8 +93,9 @@ services:
         sync: false
       - key: PYTHONPATH
         value: /app
-    buildCommand: docker build -t catalog-worker .
-    startCommand: ./start.sh
+    buildCommand: >
+      chmod +x start.sh
+      chmod +x worker-start.sh
 
   # Celery Beat Service
   - type: worker
@@ -136,8 +137,9 @@ services:
         sync: false
       - key: PYTHONPATH
         value: /app
-    buildCommand: docker build -t catalog-beat .
-    startCommand: ./start.sh
+    buildCommand: >
+      chmod +x start.sh
+      chmod +x beat-start.sh
 
   # MinIO S3-compatible Storage (Note: You may need to use a third-party S3 service instead)
   # Render doesn't offer direct MinIO hosting, so we'll run it as a private service
