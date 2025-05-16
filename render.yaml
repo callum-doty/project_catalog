@@ -1,4 +1,4 @@
-# Fixed render.yaml with merged services, removed extensions field, and removed startCommand for Docker runtime
+# Fixed render.yaml with merged services, removed extensions field, removed startCommand for Docker runtime, and updated database plan
 services:
   # Flask Web Service
   - type: web
@@ -171,7 +171,7 @@ services:
 databases:
   # PostgreSQL Database with Vector Extension
   - name: catalog-postgres
-    plan: standard # Choose appropriate plan
+    plan: free # Updated to use the free plan instead of standard
     region: oregon
     postgresMajorVersion: 14 # Match your current version
     ipAllowList: [] # Allow all IPs (or restrict as needed)
