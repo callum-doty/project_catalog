@@ -1,4 +1,4 @@
-# Fixed render.yaml with merged services
+# Fixed render.yaml with merged services and removed extensions field
 services:
   # Flask Web Service
   - type: web
@@ -173,5 +173,3 @@ databases:
     region: oregon
     postgresMajorVersion: 14 # Match your current version
     ipAllowList: [] # Allow all IPs (or restrict as needed)
-    extensions:
-      - vector # pgvector extension for similarity search
