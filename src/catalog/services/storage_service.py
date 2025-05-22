@@ -1,4 +1,3 @@
-
 from minio import Minio
 import os
 from urllib3 import PoolManager
@@ -20,21 +19,24 @@ class MinIOStorage:
         if self._client is None:
             self.logger = logging.getLogger(__name__)
             http_client = PoolManager(timeout=10.0, retries=3)
-            endpoint = os.getenv("MINIO_URL", "minio:9000")
+            # Use MINIO_ENDPOINT to match render.yaml; fallback for local dev
+            endpoint = os.getenv("MINIO_ENDPOINT", os.getenv("MINIO_URL", "minio:9000"))
             access_key = os.getenv("MINIO_ACCESS_KEY", "minioaccess")
             secret_key = os.getenv("MINIO_SECRET_KEY", "miniosecret")
 
-            self.logger.info(
-                f"Initializing Minio client with endpoint: {endpoint}")
+            self.logger.info(f"Initializing Minio client with endpoint: {endpoint}")
 
             self._client = Minio(
                 endpoint=endpoint,
                 access_key=access_key,
                 secret_key=secret_key,
-                secure=False,
-                http_client=http_client
+                secure=False,  # In Render, communication is internal, often HTTP
+                http_client=http_client,
             )
-            self.bucket = os.getenv("MINIO_BUCKET", "documents")
+            # Use S3_BUCKET_NAME to match render.yaml; fallback for local dev
+            self.bucket = os.getenv(
+                "S3_BUCKET_NAME", os.getenv("MINIO_BUCKET", "documents")
+            )
 
             # Make sure bucket exists
             try:
@@ -59,9 +61,7 @@ class MinIOStorage:
                 raise FileNotFoundError(f"File not found: {filepath}")
 
             self.client.fput_object(
-                bucket_name=self.bucket,
-                object_name=filename,
-                file_path=filepath
+                bucket_name=self.bucket, object_name=filename, file_path=filepath
             )
 
             # Verify the file was uploaded
@@ -93,7 +93,7 @@ class MinIOStorage:
             data = io.BytesIO()
             response = self.client.get_object(self.bucket, filename)
 
-            for d in response.stream(32*1024):
+            for d in response.stream(32 * 1024):
                 data.write(d)
             data.seek(0)
 
@@ -107,37 +107,40 @@ class MinIOStorage:
     def _get_placeholder_image(self):
         """Return a placeholder image for missing files"""
         # Path to a default placeholder image in your static directory
-        placeholder_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                        'static', 'img', 'placeholder.png')
+        placeholder_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "static",
+            "img",
+            "placeholder.png",
+        )
 
         # If the placeholder exists, return it
         if os.path.exists(placeholder_path):
-            with open(placeholder_path, 'rb') as f:
+            with open(placeholder_path, "rb") as f:
                 return f.read()
 
         # Otherwise generate a simple blank image using PIL
         try:
             from PIL import Image, ImageDraw
-            img = Image.new('RGB', (300, 300), color=(240, 240, 240))
+
+            img = Image.new("RGB", (300, 300), color=(240, 240, 240))
             d = ImageDraw.Draw(img)
             d.text((100, 140), "No Image", fill=(120, 120, 120))
 
             img_io = io.BytesIO()
-            img.save(img_io, 'PNG')
+            img.save(img_io, "PNG")
             img_io.seek(0)
             return img_io.getvalue()
         except Exception:
             # If all else fails, return empty bytes
-            return b''
+            return b""
 
     def download_file(self, filename, download_path):
         """Download file from MinIO to a local path"""
         try:
             self.logger.info(f"Downloading file from MinIO: {filename}")
             self.client.fget_object(
-                bucket_name=self.bucket,
-                object_name=filename,
-                file_path=download_path
+                bucket_name=self.bucket, object_name=filename, file_path=download_path
             )
 
             if os.path.exists(download_path):
@@ -145,7 +148,8 @@ class MinIOStorage:
                 return download_path
             else:
                 raise FileNotFoundError(
-                    f"Download failed - file not created: {download_path}")
+                    f"Download failed - file not created: {download_path}"
+                )
         except Exception as e:
             self.logger.error(f"MinIO download failed: {str(e)}")
             raise Exception(f"MinIO download failed: {str(e)}")

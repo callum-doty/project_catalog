@@ -61,7 +61,7 @@ services:
       - key: SERVICE_TYPE # Added to specify web service for start.sh
         value: "web"
       - key: PYTHON_VERSION
-        value: "3.11" # Specify your Python version
+        value: "3.9" # Specify your Python version
       - key: DATABASE_URL
         fromService:
           type: pserv
@@ -118,7 +118,7 @@ services:
       - key: SERVICE_TYPE # Added to specify worker service for start.sh
         value: "worker"
       - key: PYTHON_VERSION
-        value: "3.11" # Specify your Python version
+        value: "3.9" # Specify your Python version
       - key: DATABASE_URL
         fromService:
           type: pserv
@@ -181,7 +181,7 @@ services:
       - key: SERVICE_TYPE # Added for consistency, though command is direct
         value: "beat"
       - key: PYTHON_VERSION
-        value: "3.11" # Specify your Python version
+        value: "3.9" # Specify your Python version
       - key: DATABASE_URL
         fromService:
           type: pserv
