@@ -27,8 +27,16 @@ class MinIOStorage:
             # Enhanced logging for environment variables
             minio_endpoint_env = os.getenv("MINIO_ENDPOINT")
             minio_url_env = os.getenv("MINIO_URL")
-            self.logger.info(f"DEBUG: MINIO_ENDPOINT from env: '{minio_endpoint_env}'")
-            self.logger.info(f"DEBUG: MINIO_URL from env: '{minio_url_env}'")
+
+            # Using print for guaranteed output, and logger
+            print(f"DEBUG_PRINT: MINIO_ENDPOINT from env: '{minio_endpoint_env}'")
+            print(f"DEBUG_PRINT: MINIO_URL from env: '{minio_url_env}'")
+            print(f"DEBUG_PRINT: Resolved endpoint for Minio client: {endpoint}")
+
+            self.logger.info(
+                f"DEBUG_LOGGER: MINIO_ENDPOINT from env: '{minio_endpoint_env}'"
+            )
+            self.logger.info(f"DEBUG_LOGGER: MINIO_URL from env: '{minio_url_env}'")
             self.logger.info(
                 f"Initializing Minio client with resolved endpoint: {endpoint}"
             )
