@@ -1,13 +1,266 @@
 # Render Blueprint Spec: https://render.com/docs/blueprint-spec
-# Minimal test for postgresql service
+# This file outlines the services and infrastructure for deploying the Project Catalog application on Render.
 
 services:
   # --------------------
   # Managed Databases
   # --------------------
   - type: pserv
-    name: postgresql-db-test
-    plan: free
+    name: postgresql-db
+    plan: free # Or your preferred plan, e.g., standard-0
     postgres:
-      version: 15
+      version: 15 # Or your preferred version
+    region: oregon # Or your preferred region
+
+  - type: pserv
+    name: redis-cache
+    plan: free # Or your preferred plan
+    redis:
+      version: 7 # Or your preferred version
+    region: oregon # Or your preferred region
+
+  # --------------------
+  # Private Services
+  # --------------------
+  - type: web
+    name: minio-storage # Internal MinIO server
+    healthCheckPath: /minio/health/live
+    runtime: image
+    image:
+      url: docker.io/minio/minio:RELEASE.2023-05-04T21-44-30Z # Using the version from your previous attempts
+    dockerCommand: minio server /data --address $HOST:$PORT --console-address $HOST:$CONSOLE_PORT
     region: oregon
+    plan: standard # Or your preferred plan
+    autoDeploy: false
+    disk:
+      name: minio-data
+      mountPath: /data
+      sizeGB: 10 # Adjust as needed
+    envVars:
+      - key: MINIO_ROOT_USER
+        generateValue: true
+      - key: MINIO_ROOT_PASSWORD
+        generateValue: true
+      - key: MINIO_DEFAULT_BUCKETS # Your custom variable
+        value: "documents"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: PORT # API Port for MinIO server
+        value: "9000"
+      - key: CONSOLE_PORT # Internal Console Port for MinIO server
+        value: "9001" # Using 9001 as you had previously
+
+  - type: web
+    name: minio-storage-console # Internal MinIO console proxy
+    runtime: docker
+    dockerContext: . # Assumes Dockerfile.minio-console & template are in root
+    dockerfilePath: ./Dockerfile.minio-console # IMPORTANT: Assumes you copied and renamed the Dockerfile from render-examples/minio
+    region: oregon
+    plan: free # Console proxy is lightweight
+    autoDeploy: false
+    envVars:
+      - key: PORT # Port the Nginx console proxy will listen on
+        value: "10000" # Render will assign a public URL to this
+      - key: MINIO_HOST
+        fromService:
+          name: minio-storage # Links to the internal MinIO server defined above
+          type: web
+          property: host
+      - key: MINIO_CONSOLE_PORT
+        fromService:
+          name: minio-storage # Links to the internal MinIO server defined above
+          type: web
+          envVarKey: CONSOLE_PORT # Gets the CONSOLE_PORT (9001) from minio-storage
+
+  # --------------------
+  # Application Services
+  # --------------------
+  - type: web
+    name: project-catalog-web
+    env: python
+    region: oregon # Or your preferred region
+    plan: free # Or your preferred plan, e.g., standard
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      # Add any database migration commands here if needed, e.g.:
+      # alembic upgrade head
+      # Note: start.sh for web service type already runs 'flask db upgrade'
+    startCommand: "sh start.sh"
+    healthCheckPath: "/password-check" # This route is unauthenticated and returns 200
+    envVars:
+      - key: SERVICE_TYPE # Added to specify web service for start.sh
+        value: "web"
+      - key: PYTHON_VERSION
+        value: "3.9" # Specify your Python version
+      - key: DATABASE_URL
+        fromService:
+          type: pserv
+          name: postgresql-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: pserv
+          name: redis-cache
+          property: connectionString
+      - key: MINIO_ENDPOINT
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          property: hostport # e.g., minio-storage:9000
+      - key: MINIO_ACCESS_KEY
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          envVarKey: MINIO_ROOT_USER
+      - key: MINIO_SECRET_KEY
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          envVarKey: MINIO_ROOT_PASSWORD
+      - key: S3_BUCKET_NAME # Or whatever your app uses for the bucket name
+        value: "documents" # Must match MINIO_DEFAULT_BUCKETS or be created
+      - key: SECRET_KEY # For Flask session management, etc.
+        generateValue: true
+      - key: FLASK_ENV
+        value: "production"
+      - key: APP_SETTINGS # If you use a config file based on an env var
+        value: "src.config.ProductionConfig" # Example, adjust to your app's config
+      # Add other necessary environment variables for your web service
+      # - key: OPENAI_API_KEY
+      #   sync: false # Mark as secret
+      # - key: DROPBOX_APP_KEY
+      #   sync: false
+      # - key: DROPBOX_APP_SECRET
+      #   sync: false
+      # - key: DROPBOX_REFRESH_TOKEN
+      #   sync: false
+
+  - type: worker
+    name: project-catalog-worker
+    env: python
+    region: oregon # Or your preferred region
+    plan: free # Or your preferred plan, e.g., standard
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: "sh start.sh" # Changed to use the main start.sh
+    envVars:
+      - key: SERVICE_TYPE # Added to specify worker service for start.sh
+        value: "worker"
+      - key: PYTHON_VERSION
+        value: "3.9" # Specify your Python version
+      - key: DATABASE_URL
+        fromService:
+          type: pserv
+          name: postgresql-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: pserv
+          name: redis-cache
+          property: connectionString
+      - key: MINIO_ENDPOINT
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          property: hostport
+      - key: MINIO_ACCESS_KEY
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          envVarKey: MINIO_ROOT_USER
+      - key: MINIO_SECRET_KEY
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          envVarKey: MINIO_ROOT_PASSWORD
+      - key: S3_BUCKET_NAME
+        value: "documents"
+      - key: SECRET_KEY
+        fromService: # Sync with web service's generated secret key
+          type: web
+          name: project-catalog-web
+          envVarKey: SECRET_KEY
+      - key: FLASK_ENV
+        value: "production"
+      - key: APP_SETTINGS
+        value: "src.config.ProductionConfig" # Example
+      # Add other necessary environment variables for your worker
+      # - key: OPENAI_API_KEY
+      #   sync: false
+      # - key: DROPBOX_APP_KEY
+      #   sync: false
+      # - key: DROPBOX_APP_SECRET
+      #   sync: false
+      # - key: DROPBOX_REFRESH_TOKEN
+      #   sync: false
+
+  - type: cron
+    name: project-catalog-cron
+    env: python
+    region: oregon # Or your preferred region
+    plan: free # Cron jobs are usually free or low cost
+    schedule: "0 * * * *" # Example: Run every hour at minute 0. Adjust as needed.
+    command: "celery -A src.catalog.tasks.celery_app beat -s ./celerybeat-schedule --loglevel=INFO"
+    # buildCommand is typically not needed for cron if it uses the same env as web/worker
+    # but if it has separate dependencies or build steps, define them.
+    # buildCommand: |
+    #   pip install --upgrade pip
+    #   pip install -r requirements.txt # Assuming cron needs same deps
+    envVars:
+      - key: SERVICE_TYPE # Added for consistency, though command is direct
+        value: "beat"
+      - key: PYTHON_VERSION
+        value: "3.9" # Specify your Python version
+      - key: DATABASE_URL
+        fromService:
+          type: pserv
+          name: postgresql-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: pserv
+          name: redis-cache
+          property: connectionString
+      - key: MINIO_ENDPOINT
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          property: hostport
+      - key: MINIO_ACCESS_KEY
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          envVarKey: MINIO_ROOT_USER
+      - key: MINIO_SECRET_KEY
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          envVarKey: MINIO_ROOT_PASSWORD
+      - key: S3_BUCKET_NAME
+        value: "documents"
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: project-catalog-web
+          envVarKey: SECRET_KEY
+      - key: FLASK_ENV
+        value: "production"
+      - key: APP_SETTINGS
+        value: "src.config.ProductionConfig" # Example
+      # Add other necessary environment variables for your cron job
+# Environment Variable Groups (Optional, for shared variables not tied to services)
+# envVarGroups:
+#   - name: common-secrets
+#     envVars:
+#       - key: OPENAI_API_KEY
+#         value: "your_openai_api_key_here" # Set this in Render UI as a secret
+#         sync: false
+#       - key: ANOTHER_SHARED_SECRET
+#         generateValue: true
+#         sync: false
+#
+# Then in your services, you can do:
+# envVarGroups:
+#   - common-secrets
