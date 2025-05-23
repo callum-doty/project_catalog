@@ -25,7 +25,7 @@ services:
   - type: pserv
     name: minio-storage # Render log showed "catalog-minio", but this is the defined name
     env: docker # MinIO is typically run as a Docker container
-    dockerfilePath: ./minio.Dockerfile # Changed to lowercase 'm' to match error log
+    dockerfilePath: ./Dockerfile.minio # Reverted to original casing, matching actual file
     dockerCommand: "server /data --console-address :9001" # Default MinIO command
     region: oregon # Or your preferred region
     plan: standard # Choose a plan with sufficient disk space
