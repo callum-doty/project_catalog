@@ -6,8 +6,8 @@ services:
   # Managed Databases
   # --------------------
   - type: pserv
-    name: postgresql-db-test # Using a slightly different name for the test
+    name: postgresql-db-test
     plan: free
     postgres:
       version: 15
-    region: oregon # Or your preferred region
+    region: oregon
