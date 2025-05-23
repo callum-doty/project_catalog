@@ -27,7 +27,7 @@ services:
     env: docker # MinIO is typically run as a Docker container
     port: 9000 # Explicitly declare the API port for Render
     dockerfilePath: ./Dockerfile.minio # Reverted to original casing, matching actual file
-    dockerCommand: "server /data --address 0.0.0.0:9000 --console-address 0.0.0.0:9001" # Explicitly bind to 0.0.0.0
+    # dockerCommand: "server /data --address 0.0.0.0:9000 --console-address 0.0.0.0:9001" # Explicitly bind to 0.0.0.0 # REMOVED TO USE IMAGE DEFAULT CMD
     region: oregon # Or your preferred region
     plan: standard # Choose a plan with sufficient disk space
     disk:
