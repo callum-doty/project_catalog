@@ -19,20 +19,34 @@ class MinIOStorage:
         if self._client is None:
             self.logger = logging.getLogger(__name__)
             http_client = PoolManager(timeout=10.0, retries=3)
-            # Use MINIO_ENDPOINT to match render.yaml; fallback for local dev
-            endpoint = os.getenv("MINIO_ENDPOINT", os.getenv("MINIO_URL", "minio:9000"))
+
+            # Determine endpoint with production-specific override if MINIO_ENDPOINT is missing
+            minio_endpoint_env = os.getenv("MINIO_ENDPOINT")
+            minio_url_env = os.getenv("MINIO_URL")
+            flask_env = os.getenv("FLASK_ENV")
+
+            if flask_env == "production":
+                if minio_endpoint_env:
+                    endpoint = minio_endpoint_env
+                else:
+                    self.logger.warning(
+                        "MINIO_ENDPOINT not set in production. Defaulting to 'minio-storage:9000'. "
+                        "This may indicate an issue with Render environment variable injection."
+                    )
+                    endpoint = "minio-storage:9000"
+            else:  # Local development or other environments
+                endpoint = minio_endpoint_env or minio_url_env or "minio:9000"
+
             access_key = os.getenv("MINIO_ACCESS_KEY", "minioaccess")
             secret_key = os.getenv("MINIO_SECRET_KEY", "miniosecret")
 
-            # Enhanced logging for environment variables
-            minio_endpoint_env = os.getenv("MINIO_ENDPOINT")
-            minio_url_env = os.getenv("MINIO_URL")
-
             # Using print for guaranteed output, and logger
+            print(f"DEBUG_PRINT: FLASK_ENV from env: '{flask_env}'")
             print(f"DEBUG_PRINT: MINIO_ENDPOINT from env: '{minio_endpoint_env}'")
             print(f"DEBUG_PRINT: MINIO_URL from env: '{minio_url_env}'")
             print(f"DEBUG_PRINT: Resolved endpoint for Minio client: {endpoint}")
 
+            self.logger.info(f"DEBUG_LOGGER: FLASK_ENV from env: '{flask_env}'")
             self.logger.info(
                 f"DEBUG_LOGGER: MINIO_ENDPOINT from env: '{minio_endpoint_env}'"
             )
