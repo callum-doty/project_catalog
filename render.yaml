@@ -22,10 +22,11 @@ services:
   # --------------------
   # Private Services
   # --------------------
-  - type: pserv
+  - type: web # Changed from pserv to web, aligning with Render's MinIO example
     name: minio-storage # Render log showed "catalog-minio", but this is the defined name
     env: docker # MinIO is typically run as a Docker container
     port: 9000 # Explicitly declare the API port for Render
+    healthCheckPath: /minio/health/live # Added health check for web service type
     dockerfilePath: ./Dockerfile.minio # Reverted to original casing, matching actual file
     dockerCommand: "sh -c 'minio server /data --console-address :9001'" # Use sh -c for robust command execution
     region: oregon # Or your preferred region
