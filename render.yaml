@@ -25,6 +25,7 @@ services:
   - type: pserv
     name: minio-storage # Render log showed "catalog-minio", but this is the defined name
     env: docker # MinIO is typically run as a Docker container
+    port: 9000 # Explicitly declare the API port for Render
     dockerfilePath: ./Dockerfile.minio # Reverted to original casing, matching actual file
     dockerCommand: "server /data --console-address :9001" # Default MinIO command
     region: oregon # Or your preferred region
