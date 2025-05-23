@@ -24,7 +24,14 @@ class MinIOStorage:
             access_key = os.getenv("MINIO_ACCESS_KEY", "minioaccess")
             secret_key = os.getenv("MINIO_SECRET_KEY", "miniosecret")
 
-            self.logger.info(f"Initializing Minio client with endpoint: {endpoint}")
+            # Enhanced logging for environment variables
+            minio_endpoint_env = os.getenv("MINIO_ENDPOINT")
+            minio_url_env = os.getenv("MINIO_URL")
+            self.logger.info(f"DEBUG: MINIO_ENDPOINT from env: '{minio_endpoint_env}'")
+            self.logger.info(f"DEBUG: MINIO_URL from env: '{minio_url_env}'")
+            self.logger.info(
+                f"Initializing Minio client with resolved endpoint: {endpoint}"
+            )
 
             self._client = Minio(
                 endpoint=endpoint,
