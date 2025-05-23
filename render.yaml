@@ -22,7 +22,55 @@ services:
   # --------------------
   # Private Services
   # --------------------
-  # Removed minio-storage service definition as it's now external
+  - type: web
+    name: minio-storage # Internal MinIO server
+    healthCheckPath: /minio/health/live
+    runtime: image
+    image:
+      url: docker.io/minio/minio:RELEASE.2023-05-04T21-44-30Z # Using the version from your previous attempts
+    dockerCommand: minio server /data --address $HOST:$PORT --console-address $HOST:$CONSOLE_PORT
+    region: oregon
+    plan: standard # Or your preferred plan
+    autoDeploy: false
+    disk:
+      name: minio-data
+      mountPath: /data
+      sizeGB: 10 # Adjust as needed
+    envVars:
+      - key: MINIO_ROOT_USER
+        generateValue: true
+      - key: MINIO_ROOT_PASSWORD
+        generateValue: true
+      - key: MINIO_DEFAULT_BUCKETS # Your custom variable
+        value: "documents"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: PORT # API Port for MinIO server
+        value: "9000"
+      - key: CONSOLE_PORT # Internal Console Port for MinIO server
+        value: "9001" # Using 9001 as you had previously
+
+  - type: web
+    name: minio-storage-console # Internal MinIO console proxy
+    runtime: docker
+    dockerContext: . # Assumes Dockerfile.minio-console & template are in root
+    dockerfilePath: ./Dockerfile.minio-console # IMPORTANT: Assumes you copied and renamed the Dockerfile from render-examples/minio
+    region: oregon
+    plan: free # Console proxy is lightweight
+    autoDeploy: false
+    envVars:
+      - key: PORT # Port the Nginx console proxy will listen on
+        value: "10000" # Render will assign a public URL to this
+      - key: MINIO_HOST
+        fromService:
+          name: minio-storage # Links to the internal MinIO server defined above
+          type: web
+          property: host
+      - key: MINIO_CONSOLE_PORT
+        fromService:
+          name: minio-storage # Links to the internal MinIO server defined above
+          type: web
+          envVarKey: CONSOLE_PORT # Gets the CONSOLE_PORT (9001) from minio-storage
 
   # --------------------
   # Application Services
@@ -56,11 +104,20 @@ services:
           name: redis-cache
           property: connectionString
       - key: MINIO_ENDPOINT
-        value: "https://minio-server-sckl.onrender.com"
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          property: hostport # e.g., minio-storage:9000
       - key: MINIO_ACCESS_KEY
-        value: "minioaccess"
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          envVarKey: MINIO_ROOT_USER
       - key: MINIO_SECRET_KEY
-        value: "miniosecret"
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          envVarKey: MINIO_ROOT_PASSWORD
       - key: S3_BUCKET_NAME # Or whatever your app uses for the bucket name
         value: "documents" # Must match MINIO_DEFAULT_BUCKETS or be created
       - key: SECRET_KEY # For Flask session management, etc.
@@ -104,11 +161,20 @@ services:
           name: redis-cache
           property: connectionString
       - key: MINIO_ENDPOINT
-        value: "https://minio-server-sckl.onrender.com"
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          property: hostport
       - key: MINIO_ACCESS_KEY
-        value: "minioaccess"
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          envVarKey: MINIO_ROOT_USER
       - key: MINIO_SECRET_KEY
-        value: "miniosecret"
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          envVarKey: MINIO_ROOT_PASSWORD
       - key: S3_BUCKET_NAME
         value: "documents"
       - key: SECRET_KEY
@@ -158,11 +224,20 @@ services:
           name: redis-cache
           property: connectionString
       - key: MINIO_ENDPOINT
-        value: "https://minio-server-sckl.onrender.com"
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          property: hostport
       - key: MINIO_ACCESS_KEY
-        value: "minioaccess"
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          envVarKey: MINIO_ROOT_USER
       - key: MINIO_SECRET_KEY
-        value: "miniosecret"
+        fromService:
+          name: minio-storage # Points to the internal MinIO server
+          type: web
+          envVarKey: MINIO_ROOT_PASSWORD
       - key: S3_BUCKET_NAME
         value: "documents"
       - key: SECRET_KEY
