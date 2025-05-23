@@ -22,33 +22,7 @@ services:
   # --------------------
   # Private Services
   # --------------------
-  - type: web
-    name: minio-storage # User's service name
-    healthCheckPath: /minio/health/live # Standard MinIO health check
-    runtime: image # Use direct image runtime
-    image:
-      url: docker.io/minio/minio:RELEASE.2023-05-04T21-44-30Z # Specific version from user's Dockerfile
-    dockerCommand: minio server /data --address $HOST:$PORT --console-address $HOST:$CONSOLE_PORT # Official command structure
-    region: oregon # User's region
-    plan: standard # User's plan
-    autoDeploy: false # From official example, good for stateful services
-    disk:
-      name: minio-data
-      mountPath: /data
-      sizeGB: 10 # Adjust size as needed
-    envVars:
-      - key: MINIO_ROOT_USER
-        generateValue: true
-      - key: MINIO_ROOT_PASSWORD
-        generateValue: true
-      - key: MINIO_DEFAULT_BUCKETS # User's custom variable
-        value: "documents"
-      - key: HOST # For MinIO to bind correctly
-        value: "0.0.0.0"
-      - key: PORT # API port for MinIO, Render will use this
-        value: "9000"
-      - key: CONSOLE_PORT # Console port for MinIO
-        value: "9001" # User's preferred console port
+  # Removed minio-storage service definition as it's now external
 
   # --------------------
   # Application Services
@@ -82,20 +56,11 @@ services:
           name: redis-cache
           property: connectionString
       - key: MINIO_ENDPOINT
-        fromService:
-          type: web # UPDATED from pserv
-          name: minio-storage
-          property: hostport # e.g., minio-storage:9000
+        value: "https://minio-server-sckl.onrender.com"
       - key: MINIO_ACCESS_KEY
-        fromService:
-          type: web # UPDATED from pserv
-          name: minio-storage
-          envVarKey: MINIO_ROOT_USER
+        value: "minioaccess"
       - key: MINIO_SECRET_KEY
-        fromService:
-          type: web # UPDATED from pserv
-          name: minio-storage
-          envVarKey: MINIO_ROOT_PASSWORD
+        value: "miniosecret"
       - key: S3_BUCKET_NAME # Or whatever your app uses for the bucket name
         value: "documents" # Must match MINIO_DEFAULT_BUCKETS or be created
       - key: SECRET_KEY # For Flask session management, etc.
@@ -139,20 +104,11 @@ services:
           name: redis-cache
           property: connectionString
       - key: MINIO_ENDPOINT
-        fromService:
-          type: web # UPDATED from pserv
-          name: minio-storage
-          property: hostport
+        value: "https://minio-server-sckl.onrender.com"
       - key: MINIO_ACCESS_KEY
-        fromService:
-          type: web # UPDATED from pserv
-          name: minio-storage
-          envVarKey: MINIO_ROOT_USER
+        value: "minioaccess"
       - key: MINIO_SECRET_KEY
-        fromService:
-          type: web # UPDATED from pserv
-          name: minio-storage
-          envVarKey: MINIO_ROOT_PASSWORD
+        value: "miniosecret"
       - key: S3_BUCKET_NAME
         value: "documents"
       - key: SECRET_KEY
@@ -202,20 +158,11 @@ services:
           name: redis-cache
           property: connectionString
       - key: MINIO_ENDPOINT
-        fromService:
-          type: web # UPDATED from pserv
-          name: minio-storage
-          property: hostport
+        value: "https://minio-server-sckl.onrender.com"
       - key: MINIO_ACCESS_KEY
-        fromService:
-          type: web # UPDATED from pserv
-          name: minio-storage
-          envVarKey: MINIO_ROOT_USER
+        value: "minioaccess"
       - key: MINIO_SECRET_KEY
-        fromService:
-          type: web # UPDATED from pserv
-          name: minio-storage
-          envVarKey: MINIO_ROOT_PASSWORD
+        value: "miniosecret"
       - key: S3_BUCKET_NAME
         value: "documents"
       - key: SECRET_KEY
