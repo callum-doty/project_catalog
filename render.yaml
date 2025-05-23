@@ -22,26 +22,33 @@ services:
   # --------------------
   # Private Services
   # --------------------
-  - type: web # Changed from pserv to web, aligning with Render's MinIO example
-    name: minio-storage # Render log showed "catalog-minio", but this is the defined name
-    env: docker # MinIO is typically run as a Docker container
-    port: 9000 # Explicitly declare the API port for Render
-    healthCheckPath: /minio/health/live # Added health check for web service type
-    dockerfilePath: ./Dockerfile.minio # Reverted to original casing, matching actual file
-    dockerCommand: "sh -c 'minio server /data --console-address :9001'" # Use sh -c for robust command execution
-    region: oregon # Or your preferred region
-    plan: standard # Choose a plan with sufficient disk space
+  - type: web
+    name: minio-storage # User's service name
+    healthCheckPath: /minio/health/live # Standard MinIO health check
+    runtime: image # Use direct image runtime
+    image:
+      url: docker.io/minio/minio:RELEASE.2023-05-04T21-44-30Z # Specific version from user's Dockerfile
+    dockerCommand: minio server /data --address $HOST:$PORT --console-address $HOST:$CONSOLE_PORT # Official command structure
+    region: oregon # User's region
+    plan: standard # User's plan
+    autoDeploy: false # From official example, good for stateful services
     disk:
       name: minio-data
       mountPath: /data
       sizeGB: 10 # Adjust size as needed
     envVars:
       - key: MINIO_ROOT_USER
-        generateValue: true # Let Render generate a secure user
+        generateValue: true
       - key: MINIO_ROOT_PASSWORD
-        generateValue: true # Let Render generate a secure password
-      - key: MINIO_DEFAULT_BUCKETS
-        value: "documents" # Default bucket for your application, adjust if needed
+        generateValue: true
+      - key: MINIO_DEFAULT_BUCKETS # User's custom variable
+        value: "documents"
+      - key: HOST # For MinIO to bind correctly
+        value: "0.0.0.0"
+      - key: PORT # API port for MinIO, Render will use this
+        value: "9000"
+      - key: CONSOLE_PORT # Console port for MinIO
+        value: "9001" # User's preferred console port
 
   # --------------------
   # Application Services
@@ -76,17 +83,17 @@ services:
           property: connectionString
       - key: MINIO_ENDPOINT
         fromService:
-          type: pserv
+          type: web # UPDATED from pserv
           name: minio-storage
           property: hostport # e.g., minio-storage:9000
       - key: MINIO_ACCESS_KEY
         fromService:
-          type: pserv
+          type: web # UPDATED from pserv
           name: minio-storage
           envVarKey: MINIO_ROOT_USER
       - key: MINIO_SECRET_KEY
         fromService:
-          type: pserv
+          type: web # UPDATED from pserv
           name: minio-storage
           envVarKey: MINIO_ROOT_PASSWORD
       - key: S3_BUCKET_NAME # Or whatever your app uses for the bucket name
@@ -133,17 +140,17 @@ services:
           property: connectionString
       - key: MINIO_ENDPOINT
         fromService:
-          type: pserv
+          type: web # UPDATED from pserv
           name: minio-storage
           property: hostport
       - key: MINIO_ACCESS_KEY
         fromService:
-          type: pserv
+          type: web # UPDATED from pserv
           name: minio-storage
           envVarKey: MINIO_ROOT_USER
       - key: MINIO_SECRET_KEY
         fromService:
-          type: pserv
+          type: web # UPDATED from pserv
           name: minio-storage
           envVarKey: MINIO_ROOT_PASSWORD
       - key: S3_BUCKET_NAME
@@ -196,17 +203,17 @@ services:
           property: connectionString
       - key: MINIO_ENDPOINT
         fromService:
-          type: pserv
+          type: web # UPDATED from pserv
           name: minio-storage
           property: hostport
       - key: MINIO_ACCESS_KEY
         fromService:
-          type: pserv
+          type: web # UPDATED from pserv
           name: minio-storage
           envVarKey: MINIO_ROOT_USER
       - key: MINIO_SECRET_KEY
         fromService:
-          type: pserv
+          type: web # UPDATED from pserv
           name: minio-storage
           envVarKey: MINIO_ROOT_PASSWORD
       - key: S3_BUCKET_NAME
