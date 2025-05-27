@@ -12,7 +12,9 @@ services:
     name: project-catalog-redis # Using a consistent naming prefix
     region: oregon
     plan: free
-    # ipAllowList: [] # Configure as needed
+    ipAllowList: # Required for Redis in blueprint
+      - source: 0.0.0.0/0 # Allows access from any IP, suitable if protected by connection string
+        description: "Allow all"
 
   # MinIO S3-compatible Storage (Private Service running official image)
   - type: web # MinIO itself runs as a web service internally
