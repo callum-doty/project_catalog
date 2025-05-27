@@ -21,65 +21,85 @@ class MinIOStorage:
             http_client = PoolManager(timeout=10.0, retries=3)
 
             # Determine endpoint with production-specific override if MINIO_ENDPOINT is missing
-            minio_endpoint_env = os.getenv("MINIO_ENDPOINT")
-            minio_url_env = os.getenv("MINIO_URL")
+            minio_internal_host_env = os.getenv("MINIO_INTERNAL_HOST")
+            minio_endpoint_env = os.getenv("MINIO_ENDPOINT")  # Fallback
+            minio_port = "9000"  # Standard MinIO port
+            minio_url_env = os.getenv("MINIO_URL")  # For local dev primarily
             flask_env = os.getenv("FLASK_ENV")
 
-            minio_secure = False  # Default to False for internal Render communication
+            minio_secure = False
+            endpoint_to_use = None
+
             if flask_env == "production":
-                if minio_endpoint_env:
-                    # Parse the endpoint to remove http(s):// if present
+                if minio_internal_host_env:
+                    self.logger.info(
+                        f"Using MINIO_INTERNAL_HOST: {minio_internal_host_env}"
+                    )
+                    # Render's internal hostnames are usually just the host, no scheme.
+                    # Communication within Render's private network is typically HTTP.
+                    endpoint_to_use = f"{minio_internal_host_env}:{minio_port}"
+                    minio_secure = False  # Assume http for internal host
+                elif minio_endpoint_env:
+                    self.logger.info(
+                        f"Falling back to MINIO_ENDPOINT: {minio_endpoint_env}"
+                    )
                     if minio_endpoint_env.startswith("https://"):
-                        endpoint = minio_endpoint_env.replace("https://", "")
+                        endpoint_to_use = minio_endpoint_env.replace("https://", "")
                         minio_secure = True
                     elif minio_endpoint_env.startswith("http://"):
-                        endpoint = minio_endpoint_env.replace("http://", "")
+                        endpoint_to_use = minio_endpoint_env.replace("http://", "")
                         minio_secure = False
                     else:
-                        endpoint = minio_endpoint_env  # Assume it's already host:port
+                        endpoint_to_use = minio_endpoint_env  # Assume host:port
                 else:
                     self.logger.warning(
-                        "MINIO_ENDPOINT not set in production. Defaulting to 'minio-storage:9000'. "
-                        "This may indicate an issue with Render environment variable injection."
+                        "Neither MINIO_INTERNAL_HOST nor MINIO_ENDPOINT set in production. Defaulting to 'minio-storage:9000'."
                     )
-                    endpoint = "minio-storage:9000"
-                    minio_secure = False  # Default for fallback
+                    endpoint_to_use = f"minio-storage:{minio_port}"
+                    minio_secure = False
             else:  # Local development or other environments
-                # Similar parsing for local, though less likely to have full URLs in env vars
-                raw_endpoint = minio_endpoint_env or minio_url_env or "minio:9000"
-                if raw_endpoint.startswith("https://"):
-                    endpoint = raw_endpoint.replace("https://", "")
+                raw_local_endpoint = (
+                    minio_endpoint_env or minio_url_env or f"minio:{minio_port}"
+                )
+                if raw_local_endpoint.startswith("https://"):
+                    endpoint_to_use = raw_local_endpoint.replace("https://", "")
                     minio_secure = True
-                elif raw_endpoint.startswith("http://"):
-                    endpoint = raw_endpoint.replace("http://", "")
+                elif raw_local_endpoint.startswith("http://"):
+                    endpoint_to_use = raw_local_endpoint.replace("http://", "")
                     minio_secure = False
                 else:
-                    endpoint = raw_endpoint
-                # For local, if endpoint is just 'minio', secure might depend on local setup
-                # but generally for 'minio:9000' it's http.
+                    endpoint_to_use = raw_local_endpoint
 
             access_key = os.getenv("MINIO_ACCESS_KEY", "minioaccess")
             secret_key = os.getenv("MINIO_SECRET_KEY", "miniosecret")
 
             # Using print for guaranteed output, and logger
             print(f"DEBUG_PRINT: FLASK_ENV from env: '{flask_env}'")
-            print(f"DEBUG_PRINT: MINIO_ENDPOINT from env: '{minio_endpoint_env}'")
+            print(
+                f"DEBUG_PRINT: MINIO_INTERNAL_HOST from env: '{minio_internal_host_env}'"
+            )
+            print(
+                f"DEBUG_PRINT: MINIO_ENDPOINT (fallback) from env: '{minio_endpoint_env}'"
+            )
             print(f"DEBUG_PRINT: MINIO_URL from env: '{minio_url_env}'")
             print(
-                f"DEBUG_PRINT: Resolved endpoint for Minio client: {endpoint}, secure: {minio_secure}"
+                f"DEBUG_PRINT: Resolved endpoint for Minio client: {endpoint_to_use}, secure: {minio_secure}"
             )
 
             self.logger.info(f"DEBUG_LOGGER: FLASK_ENV from env: '{flask_env}'")
             self.logger.info(
-                f"DEBUG_LOGGER: MINIO_ENDPOINT from env: '{minio_endpoint_env}'"
+                f"DEBUG_LOGGER: MINIO_INTERNAL_HOST from env: '{minio_internal_host_env}'"
+            )
+            self.logger.info(
+                f"DEBUG_LOGGER: MINIO_ENDPOINT (fallback) from env: '{minio_endpoint_env}'"
             )
             self.logger.info(f"DEBUG_LOGGER: MINIO_URL from env: '{minio_url_env}'")
             self.logger.info(
-                f"Initializing Minio client with resolved endpoint: {endpoint}, secure: {minio_secure}"
+                f"Initializing Minio client with resolved endpoint: {endpoint_to_use}, secure: {minio_secure}"
             )
 
             self._client = Minio(
-                endpoint=endpoint,  # Should now be 'minio-storage:9000'
+                endpoint=endpoint_to_use,
                 access_key=access_key,
                 secret_key=secret_key,
                 secure=minio_secure,  # Dynamically set based on parsed scheme

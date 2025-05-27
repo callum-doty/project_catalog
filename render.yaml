@@ -103,8 +103,13 @@ services:
           type: pserv
           name: redis-cache
           property: connectionString
-      - key: MINIO_ENDPOINT
-        value: "http://minio-storage:9000" # Hardcode the internal service name and port
+      - key: MINIO_INTERNAL_HOST # New variable to get just the host
+        fromService:
+          name: minio-storage
+          type: web
+          property: host # This should give the internal resolvable hostname
+      - key: MINIO_ENDPOINT # Fallback, Python code will prioritize MINIO_INTERNAL_HOST
+        value: "http://minio-storage:9000"
       - key: MINIO_ACCESS_KEY
         fromService:
           name: minio-storage # Points to the internal MinIO server
@@ -157,8 +162,13 @@ services:
           type: pserv
           name: redis-cache
           property: connectionString
-      - key: MINIO_ENDPOINT
-        value: "http://minio-storage:9000" # Hardcode the internal service name and port
+      - key: MINIO_INTERNAL_HOST # New variable to get just the host
+        fromService:
+          name: minio-storage
+          type: web
+          property: host # This should give the internal resolvable hostname
+      - key: MINIO_ENDPOINT # Fallback, Python code will prioritize MINIO_INTERNAL_HOST
+        value: "http://minio-storage:9000"
       - key: MINIO_ACCESS_KEY
         fromService:
           name: minio-storage # Points to the internal MinIO server
@@ -217,8 +227,13 @@ services:
           type: pserv
           name: redis-cache
           property: connectionString
-      - key: MINIO_ENDPOINT
-        value: "http://minio-storage:9000" # Hardcode the internal service name and port
+      - key: MINIO_INTERNAL_HOST # New variable to get just the host
+        fromService:
+          name: minio-storage
+          type: web
+          property: host # This should give the internal resolvable hostname
+      - key: MINIO_ENDPOINT # Fallback, Python code will prioritize MINIO_INTERNAL_HOST
+        value: "http://minio-storage:9000"
       - key: MINIO_ACCESS_KEY
         fromService:
           name: minio-storage # Points to the internal MinIO server
