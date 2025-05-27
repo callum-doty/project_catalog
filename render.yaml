@@ -5,18 +5,16 @@ services:
   # --------------------
   # Managed Databases
   # --------------------
-  - type: pserv # Private Service for PostgreSQL
+  - type: postgres # Dedicated type for Render Managed PostgreSQL
     name: postgresql-db
-    runtime: postgres # Specify runtime for pserv
-    plan: free
-    # version: 15 # Optional: Render picks a recent, stable version for free tier
+    plan: free # Or your preferred plan
+    # postgresVersion: 15 # Optional: specify version if not default for plan
     region: oregon
 
-  - type: pserv # Private Service for Redis
+  - type: redis # Dedicated type for Render Managed Redis
     name: redis-cache
-    runtime: redis # Specify runtime for pserv
-    plan: free
-    # version: 7 # Optional: Render picks a recent, stable version for free tier
+    plan: free # Or your preferred plan
+    # redisVersion: 7 # Optional: specify version if not default for plan
     region: oregon
 
   # --------------------
@@ -95,12 +93,12 @@ services:
         value: "3.9" # Specify your Python version
       - key: DATABASE_URL
         fromService:
-          type: pserv # Match the type of postgresql-db service
+          type: postgres # Match the type of postgresql-db service
           name: postgresql-db
           property: connectionString
       - key: REDIS_URL
         fromService:
-          type: pserv # Match the type of redis-cache service
+          type: redis # Match the type of redis-cache service
           name: redis-cache
           property: connectionString
       - key: MINIO_INTERNAL_HOST # New variable to get just the host
@@ -154,12 +152,12 @@ services:
         value: "3.9" # Specify your Python version
       - key: DATABASE_URL
         fromService:
-          type: pserv # Match the type of postgresql-db service
+          type: postgres # Match the type of postgresql-db service
           name: postgresql-db
           property: connectionString
       - key: REDIS_URL
         fromService:
-          type: pserv # Match the type of redis-cache service
+          type: redis # Match the type of redis-cache service
           name: redis-cache
           property: connectionString
       - key: MINIO_INTERNAL_HOST # New variable to get just the host
