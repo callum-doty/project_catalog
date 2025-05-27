@@ -7,15 +7,13 @@ services:
   # --------------------
   - type: postgres # Dedicated type for Render Managed PostgreSQL
     name: postgresql-db
-    plan: free # Or your preferred plan
-    # postgresVersion: 15 # Optional: specify version if not default for plan
     region: oregon
+    plan: free # Explicitly setting free plan
 
   - type: redis # Dedicated type for Render Managed Redis
     name: redis-cache
-    plan: free # Or your preferred plan
-    # redisVersion: 7 # Optional: specify version if not default for plan
     region: oregon
+    plan: free # Explicitly setting free plan
 
   # --------------------
   # Private Services
