@@ -2,18 +2,9 @@
 # This file outlines the services and infrastructure for deploying the Project Catalog application on Render.
 
 services:
-  # --------------------
-  # Managed Databases
-  # --------------------
-  - type: postgres # Dedicated type for Render Managed PostgreSQL
-    name: postgresql-db
-    region: oregon
-    plan: free # Explicitly setting free plan
-
-  - type: redis # Dedicated type for Render Managed Redis
-    name: redis-cache
-    region: oregon
-    plan: free # Explicitly setting free plan
+  # Managed Databases (PostgreSQL, Redis) are assumed to be provisioned manually
+  # in the Render dashboard and their connection URLs (DATABASE_URL, REDIS_URL)
+  # must be set as environment variables for each application service directly in the dashboard.
 
   # --------------------
   # Private Services
@@ -89,16 +80,8 @@ services:
         value: "web"
       - key: PYTHON_VERSION
         value: "3.9" # Specify your Python version
-      - key: DATABASE_URL
-        fromService:
-          type: postgres # Match the type of postgresql-db service
-          name: postgresql-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis # Match the type of redis-cache service
-          name: redis-cache
-          property: connectionString
+      # DATABASE_URL must be set manually in Render Dashboard for this service
+      # REDIS_URL must be set manually in Render Dashboard for this service
       - key: MINIO_INTERNAL_HOST # New variable to get just the host
         fromService:
           name: minio-storage
@@ -148,16 +131,8 @@ services:
         value: "worker"
       - key: PYTHON_VERSION
         value: "3.9" # Specify your Python version
-      - key: DATABASE_URL
-        fromService:
-          type: postgres # Match the type of postgresql-db service
-          name: postgresql-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis # Match the type of redis-cache service
-          name: redis-cache
-          property: connectionString
+      # DATABASE_URL must be set manually in Render Dashboard for this service
+      # REDIS_URL must be set manually in Render Dashboard for this service
       - key: MINIO_INTERNAL_HOST # New variable to get just the host
         fromService:
           name: minio-storage
