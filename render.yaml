@@ -5,18 +5,17 @@ services:
   # --------------------
   # Managed Databases
   # --------------------
-  - type: pserv
+  - type: db # Correct type for managed PostgreSQL
     name: postgresql-db
+    engine: POSTGRES # Specify the database engine
     plan: free # Or your preferred plan, e.g., standard-0
-    postgres:
-      version: 15 # Or your preferred version
+    # version: 15 # Version might be part of the plan or default for free tier
     region: oregon # Or your preferred region
 
-  - type: pserv
+  - type: redis # Correct type for managed Redis
     name: redis-cache
     plan: free # Or your preferred plan
-    redis:
-      version: 7 # Or your preferred version
+    # version: 7 # Version might be part of the plan or default for free tier
     region: oregon # Or your preferred region
 
   # --------------------
@@ -95,12 +94,12 @@ services:
         value: "3.9" # Specify your Python version
       - key: DATABASE_URL
         fromService:
-          type: pserv
+          type: db # Match the type of postgresql-db service
           name: postgresql-db
           property: connectionString
       - key: REDIS_URL
         fromService:
-          type: pserv
+          type: redis # Match the type of redis-cache service
           name: redis-cache
           property: connectionString
       - key: MINIO_INTERNAL_HOST # New variable to get just the host
@@ -154,12 +153,12 @@ services:
         value: "3.9" # Specify your Python version
       - key: DATABASE_URL
         fromService:
-          type: pserv
+          type: db # Match the type of postgresql-db service
           name: postgresql-db
           property: connectionString
       - key: REDIS_URL
         fromService:
-          type: pserv
+          type: redis # Match the type of redis-cache service
           name: redis-cache
           property: connectionString
       - key: MINIO_INTERNAL_HOST # New variable to get just the host
@@ -219,12 +218,12 @@ services:
         value: "3.9" # Specify your Python version
       - key: DATABASE_URL
         fromService:
-          type: pserv
+          type: db # Match the type of postgresql-db service
           name: postgresql-db
           property: connectionString
       - key: REDIS_URL
         fromService:
-          type: pserv
+          type: redis # Match the type of redis-cache service
           name: redis-cache
           property: connectionString
       - key: MINIO_INTERNAL_HOST # New variable to get just the host
