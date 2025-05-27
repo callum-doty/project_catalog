@@ -115,7 +115,9 @@ class MinIOStorage:
             try:
                 self.client.stat_object(self.bucket, filename)
             except Exception as e:
-                self.logger.error(f"File does not exist in MinIO: {filename}")
+                self.logger.error(
+                    f"Error calling stat_object for {filename} in MinIO: {str(e)}"
+                )
                 # Return a default placeholder image if file doesn't exist
                 return self._get_placeholder_image()
 
