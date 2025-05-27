@@ -199,63 +199,63 @@ services:
       #   sync: false
       # - key: DROPBOX_REFRESH_TOKEN
       #   sync: false
-
-  - type: cron
-    name: project-catalog-cron
-    env: python
-    region: oregon # Or your preferred region
-    plan: free # Cron jobs are usually free or low cost
-    schedule: "0 * * * *" # Example: Run every hour at minute 0. Adjust as needed.
-    command: "celery -A src.catalog.tasks.celery_app beat -s ./celerybeat-schedule --loglevel=INFO"
-    # buildCommand is typically not needed for cron if it uses the same env as web/worker
-    # but if it has separate dependencies or build steps, define them.
-    # buildCommand: |
-    #   pip install --upgrade pip
-    #   pip install -r requirements.txt # Assuming cron needs same deps
-    envVars:
-      - key: SERVICE_TYPE # Added for consistency, though command is direct
-        value: "beat"
-      - key: PYTHON_VERSION
-        value: "3.9" # Specify your Python version
-      - key: DATABASE_URL
-        fromService:
-          type: pserv # Match the type of postgresql-db service
-          name: postgresql-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: pserv # Match the type of redis-cache service
-          name: redis-cache
-          property: connectionString
-      - key: MINIO_INTERNAL_HOST # New variable to get just the host
-        fromService:
-          name: minio-storage
-          type: web
-          property: host # This should give the internal resolvable hostname
-      - key: MINIO_ENDPOINT # Fallback, Python code will prioritize MINIO_INTERNAL_HOST
-        value: "http://minio-storage:9000"
-      - key: MINIO_ACCESS_KEY
-        fromService:
-          name: minio-storage # Points to the internal MinIO server
-          type: web
-          envVarKey: MINIO_ROOT_USER
-      - key: MINIO_SECRET_KEY
-        fromService:
-          name: minio-storage # Points to the internal MinIO server
-          type: web
-          envVarKey: MINIO_ROOT_PASSWORD
-      - key: S3_BUCKET_NAME
-        value: "documents"
-      - key: SECRET_KEY
-        fromService:
-          type: web
-          name: project-catalog-web
-          envVarKey: SECRET_KEY
-      - key: FLASK_ENV
-        value: "production"
-      - key: APP_SETTINGS
-        value: "src.config.ProductionConfig" # Example
-      # Add other necessary environment variables for your cron job
+# Temporarily commenting out cron job to isolate blueprint sync issue
+#  - type: cron
+#    name: project-catalog-cron
+#    env: python
+#    region: oregon # Or your preferred region
+#    plan: free # Cron jobs are usually free or low cost
+#    schedule: "0 * * * *" # Example: Run every hour at minute 0. Adjust as needed.
+#    command: "celery -A src.catalog.tasks.celery_app beat -s ./celerybeat-schedule --loglevel=INFO"
+#    # buildCommand is typically not needed for cron if it uses the same env as web/worker
+#    # but if it has separate dependencies or build steps, define them.
+#    # buildCommand: |
+#    #   pip install --upgrade pip
+#    #   pip install -r requirements.txt # Assuming cron needs same deps
+#    envVars:
+#      - key: SERVICE_TYPE # Added for consistency, though command is direct
+#        value: "beat"
+#      - key: PYTHON_VERSION
+#        value: "3.9" # Specify your Python version
+#      - key: DATABASE_URL
+#        fromService:
+#          type: pserv # Match the type of postgresql-db service
+#          name: postgresql-db
+#          property: connectionString
+#      - key: REDIS_URL
+#        fromService:
+#          type: pserv # Match the type of redis-cache service
+#          name: redis-cache
+#          property: connectionString
+#      - key: MINIO_INTERNAL_HOST # New variable to get just the host
+#        fromService:
+#          name: minio-storage
+#          type: web
+#          property: host # This should give the internal resolvable hostname
+#      - key: MINIO_ENDPOINT # Fallback, Python code will prioritize MINIO_INTERNAL_HOST
+#        value: "http://minio-storage:9000"
+#      - key: MINIO_ACCESS_KEY
+#        fromService:
+#          name: minio-storage # Points to the internal MinIO server
+#          type: web
+#          envVarKey: MINIO_ROOT_USER
+#      - key: MINIO_SECRET_KEY
+#        fromService:
+#          name: minio-storage # Points to the internal MinIO server
+#          type: web
+#          envVarKey: MINIO_ROOT_PASSWORD
+#      - key: S3_BUCKET_NAME
+#        value: "documents"
+#      - key: SECRET_KEY
+#        fromService:
+#          type: web
+#          name: project-catalog-web
+#          envVarKey: SECRET_KEY
+#      - key: FLASK_ENV
+#        value: "production"
+#      - key: APP_SETTINGS
+#        value: "src.config.ProductionConfig" # Example
+#      # Add other necessary environment variables for your cron job
 # Environment Variable Groups (Optional, for shared variables not tied to services)
 # envVarGroups:
 #   - name: common-secrets
