@@ -2,7 +2,7 @@
 
 databases: # Correct top-level key for managed databases
   - name: project-catalog-postgres # Using a consistent naming prefix
-    plan: free
+    # plan: free # Removed to use existing instance
     region: oregon
     # postgresMajorVersion: 14 # Uncomment if you need a specific major version
 
@@ -11,7 +11,7 @@ services:
   - type: redis
     name: project-catalog-redis # Using a consistent naming prefix
     region: oregon
-    plan: free
+    # plan: free # Removed to use existing instance
     ipAllowList: # Required for Redis in blueprint
       - source: 0.0.0.0/0 # Allows access from any IP, suitable if protected by connection string
         description: "Allow all"
@@ -46,6 +46,8 @@ services:
   - type: web
     name: minio-console # Separate service for the console proxy
     runtime: docker
+    repo: https://github.com/callum-doty/project_catalog.git # Assuming your Dockerfile.minio-console is in this repo
+    branch: main # Assuming it's on the main branch
     dockerContext: .
     dockerfilePath: ./Dockerfile.minio-console
     region: oregon
