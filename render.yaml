@@ -1,218 +1,216 @@
-# Render Blueprint Spec: https://render.com/docs/blueprint-spec
-# This file outlines the services and infrastructure for deploying the Project Catalog application on Render.
+# render.yaml based on merging working parts with current MinIO setup
+
+databases: # Correct top-level key for managed databases
+  - name: project-catalog-postgres # Using a consistent naming prefix
+    plan: free
+    region: oregon
+    # postgresMajorVersion: 14 # Uncomment if you need a specific major version
 
 services:
-  # Managed Databases (PostgreSQL, Redis) are assumed to be provisioned manually
-  # in the Render dashboard and their connection URLs (DATABASE_URL, REDIS_URL)
-  # must be set as environment variables for each application service directly in the dashboard.
+  # Redis Service (Managed by Render)
+  - type: redis
+    name: project-catalog-redis # Using a consistent naming prefix
+    region: oregon
+    plan: free
+    # ipAllowList: [] # Configure as needed
 
-  # --------------------
-  # Private Services
-  # --------------------
-  - type: web
-    name: minio-storage # Internal MinIO server
-    healthCheckPath: /minio/health/live
+  # MinIO S3-compatible Storage (Private Service running official image)
+  - type: web # MinIO itself runs as a web service internally
+    name: minio-storage # Name we've been trying to link
     runtime: image
     image:
-      url: docker.io/minio/minio:RELEASE.2023-05-04T21-44-30Z # Using the version from your previous attempts
-    dockerCommand: minio server /data --address $HOST:$PORT --console-address $HOST:$CONSOLE_PORT
+      url: docker.io/minio/minio:RELEASE.2023-05-04T21-44-30Z
+    dockerCommand: minio server /data --address 0.0.0.0:$PORT --console-address 0.0.0.0:9001 # Ensure MinIO listens on $PORT
+    healthCheckPath: /minio/health/live
     region: oregon
-    plan: standard # Or your preferred plan
+    plan: standard # MinIO might need a paid plan for disk and resources
     autoDeploy: false
     disk:
       name: minio-data
       mountPath: /data
-      sizeGB: 10 # Adjust as needed
+      sizeGB: 10
     envVars:
       - key: MINIO_ROOT_USER
         generateValue: true
       - key: MINIO_ROOT_PASSWORD
         generateValue: true
-      - key: MINIO_DEFAULT_BUCKETS # Your custom variable
+      - key: MINIO_DEFAULT_BUCKETS
         value: "documents"
-      - key: HOST
-        value: "0.0.0.0"
-      - key: PORT # API Port for MinIO server
-        value: "9000"
-      - key: CONSOLE_PORT # Internal Console Port for MinIO server
-        value: "9001" # Using 9001 as you had previously
+      # PORT is automatically set by Render for web services. MinIO needs to use it.
+      # CONSOLE_PORT is not directly used by Render here, but MinIO command uses 9001.
 
+  # MinIO Console (Optional, if you need external access to console)
+  # This definition seems okay from your current file, but ensure it points to the correct MinIO service name
   - type: web
-    name: minio-storage-console # Internal MinIO console proxy
+    name: minio-console # Separate service for the console proxy
     runtime: docker
-    dockerContext: . # Assumes Dockerfile.minio-console & template are in root
-    dockerfilePath: ./Dockerfile.minio-console # IMPORTANT: Assumes you copied and renamed the Dockerfile from render-examples/minio
+    dockerContext: .
+    dockerfilePath: ./Dockerfile.minio-console
     region: oregon
-    plan: free # Console proxy is lightweight
+    plan: free
     autoDeploy: false
     envVars:
-      - key: PORT # Port the Nginx console proxy will listen on
+      - key: PORT # Port the Nginx console proxy will listen on (e.g., 10000)
         value: "10000" # Render will assign a public URL to this
       - key: MINIO_HOST
         fromService:
-          name: minio-storage # Links to the internal MinIO server defined above
+          name: minio-storage # Must match the name of your MinIO service
           type: web
           property: host
-      - key: MINIO_CONSOLE_PORT
-        fromService:
-          name: minio-storage # Links to the internal MinIO server defined above
-          type: web
-          envVarKey: CONSOLE_PORT # Gets the CONSOLE_PORT (9001) from minio-storage
+      - key: MINIO_CONSOLE_PORT # The port MinIO's console is actually running on inside its container
+        value: "9001" # As per minio-storage's dockerCommand
 
-  # --------------------
-  # Application Services
-  # --------------------
+  # Flask Web Service
   - type: web
-    name: project-catalog-web
-    env: python
-    region: oregon # Or your preferred region
-    plan: free # Or your preferred plan, e.g., standard
+    name: project-catalog-web # Current naming
+    env: python # Assuming Python runtime, not Docker as in the old working example
+    region: oregon
+    plan: free # Adjust as needed
+    # repo, branch, buildCommand, startCommand would be needed if not Docker
+    # If using Docker runtime for this service, define dockerfilePath etc.
+    # For now, assuming Python runtime as per our recent attempts:
     buildCommand: |
       pip install --upgrade pip
       pip install -r requirements.txt
-      # Add any database migration commands here if needed, e.g.:
-      # alembic upgrade head
-      # Note: start.sh for web service type already runs 'flask db upgrade'
-    startCommand: "sh start.sh"
-    healthCheckPath: "/password-check" # This route is unauthenticated and returns 200
+      # flask db upgrade # Or your migration command
+    startCommand: "sh start.sh" # Your existing start command
+    healthCheckPath: "/password-check"
     envVars:
-      - key: SERVICE_TYPE # Added to specify web service for start.sh
-        value: "web"
-      - key: PYTHON_VERSION
-        value: "3.9" # Specify your Python version
-      # DATABASE_URL must be set manually in Render Dashboard for this service
-      # REDIS_URL must be set manually in Render Dashboard for this service
-      - key: MINIO_INTERNAL_HOST # New variable to get just the host
-        fromService:
-          name: minio-storage
-          type: web
-          property: host # This should give the internal resolvable hostname
-      - key: MINIO_ENDPOINT # Fallback, Python code will prioritize MINIO_INTERNAL_HOST
-        value: "http://minio-storage:9000"
-      - key: MINIO_ACCESS_KEY
-        fromService:
-          name: minio-storage # Points to the internal MinIO server
-          type: web
-          envVarKey: MINIO_ROOT_USER
-      - key: MINIO_SECRET_KEY
-        fromService:
-          name: minio-storage # Points to the internal MinIO server
-          type: web
-          envVarKey: MINIO_ROOT_PASSWORD
-      - key: S3_BUCKET_NAME # Or whatever your app uses for the bucket name
-        value: "documents" # Must match MINIO_DEFAULT_BUCKETS or be created
-      - key: SECRET_KEY # For Flask session management, etc.
-        generateValue: true
+      - key: FLASK_APP # If your start.sh/gunicorn doesn't set it
+        value: src/wsgi.py
       - key: FLASK_ENV
-        value: "production"
-      - key: APP_SETTINGS # If you use a config file based on an env var
-        value: "src.config.ProductionConfig" # Example, adjust to your app's config
-      # Add other necessary environment variables for your web service
-      # - key: OPENAI_API_KEY
-      #   sync: false # Mark as secret
-      # - key: DROPBOX_APP_KEY
-      #   sync: false
-      # - key: DROPBOX_APP_SECRET
-      #   sync: false
-      # - key: DROPBOX_REFRESH_TOKEN
-      #   sync: false
-
-  - type: worker
-    name: project-catalog-worker
-    env: python
-    region: oregon # Or your preferred region
-    plan: free # Or your preferred plan, e.g., standard
-    buildCommand: |
-      pip install --upgrade pip
-      pip install -r requirements.txt
-    startCommand: "sh start.sh" # Changed to use the main start.sh
-    envVars:
-      - key: SERVICE_TYPE # Added to specify worker service for start.sh
-        value: "worker"
-      - key: PYTHON_VERSION
-        value: "3.9" # Specify your Python version
-      # DATABASE_URL must be set manually in Render Dashboard for this service
-      # REDIS_URL must be set manually in Render Dashboard for this service
-      - key: MINIO_INTERNAL_HOST # New variable to get just the host
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: project-catalog-postgres # Match name in databases: block
+          property: connectionString
+      - key: REDIS_URL
         fromService:
-          name: minio-storage
+          type: redis
+          name: project-catalog-redis # Match name of Redis service
+          property: connectionString
+      - key: MINIO_INTERNAL_HOST
+        fromService:
+          name: minio-storage # Match name of MinIO service
           type: web
-          property: host # This should give the internal resolvable hostname
+          property: host
       - key: MINIO_ENDPOINT # Fallback, Python code will prioritize MINIO_INTERNAL_HOST
-        value: "http://minio-storage:9000"
+        value: "http://minio-storage:9000" # The port MinIO listens on inside its container
       - key: MINIO_ACCESS_KEY
         fromService:
-          name: minio-storage # Points to the internal MinIO server
+          name: minio-storage
           type: web
           envVarKey: MINIO_ROOT_USER
       - key: MINIO_SECRET_KEY
         fromService:
-          name: minio-storage # Points to the internal MinIO server
+          name: minio-storage
           type: web
           envVarKey: MINIO_ROOT_PASSWORD
       - key: S3_BUCKET_NAME
         value: "documents"
+      - key: USE_MOCK_STORAGE # Explicitly set to false
+        value: "false"
+      - key: SERVICE_TYPE
+        value: web
       - key: SECRET_KEY
-        fromService: # Sync with web service's generated secret key
+        generateValue: true
+      # Add other necessary env vars like CLAUDE_API_KEY, APP_SETTINGS etc.
+      # - key: CLAUDE_API_KEY
+      #   sync: false
+      - key: APP_SETTINGS
+        value: "src.config.ProductionConfig"
+
+  # Celery Worker Service
+  - type: worker
+    name: project-catalog-worker # Current naming
+    env: python # Assuming Python runtime
+    region: oregon
+    plan: free # Adjust as needed
+    # buildCommand and startCommand similar to web service if Python runtime
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: "sh start.sh" # Your existing start command for worker
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: project-catalog-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: project-catalog-redis
+          property: connectionString
+      - key: MINIO_INTERNAL_HOST
+        fromService:
+          name: minio-storage
+          type: web
+          property: host
+      - key: MINIO_ENDPOINT # Fallback
+        value: "http://minio-storage:9000"
+      - key: MINIO_ACCESS_KEY
+        fromService:
+          name: minio-storage
+          type: web
+          envVarKey: MINIO_ROOT_USER
+      - key: MINIO_SECRET_KEY
+        fromService:
+          name: minio-storage
+          type: web
+          envVarKey: MINIO_ROOT_PASSWORD
+      - key: S3_BUCKET_NAME
+        value: "documents"
+      - key: USE_MOCK_STORAGE
+        value: "false"
+      - key: SERVICE_TYPE
+        value: worker
+      - key: SECRET_KEY # Sync with web service
+        fromService:
           type: web
           name: project-catalog-web
           envVarKey: SECRET_KEY
-      - key: FLASK_ENV
-        value: "production"
+      # Add other necessary env vars
+      # - key: CLAUDE_API_KEY
+      #   sync: false
       - key: APP_SETTINGS
-        value: "src.config.ProductionConfig" # Example
-      # Add other necessary environment variables for your worker
-      # - key: OPENAI_API_KEY
-      #   sync: false
-      # - key: DROPBOX_APP_KEY
-      #   sync: false
-      # - key: DROPBOX_APP_SECRET
-      #   sync: false
-      # - key: DROPBOX_REFRESH_TOKEN
-      #   sync: false
-# Temporarily commenting out cron job to isolate blueprint sync issue
+        value: "src.config.ProductionConfig"
+# Cron job section remains commented out until blueprint syncs successfully
 #  - type: cron
 #    name: project-catalog-cron
 #    env: python
-#    region: oregon # Or your preferred region
-#    plan: free # Cron jobs are usually free or low cost
-#    schedule: "0 * * * *" # Example: Run every hour at minute 0. Adjust as needed.
+#    region: oregon
+#    plan: free
+#    schedule: "0 * * * *"
 #    command: "celery -A src.catalog.tasks.celery_app beat -s ./celerybeat-schedule --loglevel=INFO"
-#    # buildCommand is typically not needed for cron if it uses the same env as web/worker
-#    # but if it has separate dependencies or build steps, define them.
-#    # buildCommand: |
-#    #   pip install --upgrade pip
-#    #   pip install -r requirements.txt # Assuming cron needs same deps
 #    envVars:
-#      - key: SERVICE_TYPE # Added for consistency, though command is direct
+#      - key: SERVICE_TYPE
 #        value: "beat"
 #      - key: PYTHON_VERSION
-#        value: "3.9" # Specify your Python version
+#        value: "3.9"
 #      - key: DATABASE_URL
-#        fromService:
-#          type: pserv # Match the type of postgresql-db service
-#          name: postgresql-db
+#        fromDatabase:
+#          name: project-catalog-postgres
 #          property: connectionString
 #      - key: REDIS_URL
 #        fromService:
-#          type: pserv # Match the type of redis-cache service
-#          name: redis-cache
+#          type: redis
+#          name: project-catalog-redis
 #          property: connectionString
-#      - key: MINIO_INTERNAL_HOST # New variable to get just the host
+#      - key: MINIO_INTERNAL_HOST
 #        fromService:
 #          name: minio-storage
 #          type: web
-#          property: host # This should give the internal resolvable hostname
-#      - key: MINIO_ENDPOINT # Fallback, Python code will prioritize MINIO_INTERNAL_HOST
+#          property: host
+#      - key: MINIO_ENDPOINT # Fallback
 #        value: "http://minio-storage:9000"
 #      - key: MINIO_ACCESS_KEY
 #        fromService:
-#          name: minio-storage # Points to the internal MinIO server
+#          name: minio-storage
 #          type: web
 #          envVarKey: MINIO_ROOT_USER
 #      - key: MINIO_SECRET_KEY
 #        fromService:
-#          name: minio-storage # Points to the internal MinIO server
+#          name: minio-storage
 #          type: web
 #          envVarKey: MINIO_ROOT_PASSWORD
 #      - key: S3_BUCKET_NAME
@@ -225,19 +223,4 @@ services:
 #      - key: FLASK_ENV
 #        value: "production"
 #      - key: APP_SETTINGS
-#        value: "src.config.ProductionConfig" # Example
-#      # Add other necessary environment variables for your cron job
-# Environment Variable Groups (Optional, for shared variables not tied to services)
-# envVarGroups:
-#   - name: common-secrets
-#     envVars:
-#       - key: OPENAI_API_KEY
-#         value: "your_openai_api_key_here" # Set this in Render UI as a secret
-#         sync: false
-#       - key: ANOTHER_SHARED_SECRET
-#         generateValue: true
-#         sync: false
-#
-# Then in your services, you can do:
-# envVarGroups:
-#   - common-secrets
+#        value: "src.config.ProductionConfig"
