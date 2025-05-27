@@ -129,7 +129,7 @@ services:
     name: project-catalog-worker # Current naming
     env: python # Assuming Python runtime
     region: oregon
-    plan: free # Adjust as needed
+    plan: starter # Aligning with your paid plan that should support workers
     # buildCommand and startCommand similar to web service if Python runtime
     buildCommand: |
       pip install --upgrade pip
