@@ -22,12 +22,10 @@ class MinIOStorage:
 
             # Determine endpoint with production-specific override if MINIO_ENDPOINT is missing
             minio_internal_host_env = os.getenv("MINIO_INTERNAL_HOST")
-            minio_internal_port_env = os.getenv(
-                "MINIO_INTERNAL_PORT"
-            )  # New variable for Render's dynamic port
+            # MINIO_INTERNAL_PORT is no longer used from env, port is fixed to 9000 for internal comms
             minio_endpoint_env = os.getenv("MINIO_ENDPOINT")  # Fallback
-            default_minio_port = (
-                "9000"  # Standard MinIO port, used if internal port not set
+            fixed_internal_minio_port = (
+                "9000"  # MinIO S3 API is now fixed to this port internally
             )
             minio_url_env = os.getenv("MINIO_URL")  # For local dev primarily
             flask_env = os.getenv("FLASK_ENV")
@@ -37,30 +35,18 @@ class MinIOStorage:
 
             if flask_env == "production":
                 self.logger.info(
-                    f"Prod Mode Check: MINIO_INTERNAL_HOST='{minio_internal_host_env}', MINIO_INTERNAL_PORT='{minio_internal_port_env}' (type: {type(minio_internal_port_env)}), MINIO_ENDPOINT='{minio_endpoint_env}'"
+                    f"Prod Mode Check: MINIO_INTERNAL_HOST='{minio_internal_host_env}', MINIO_ENDPOINT='{minio_endpoint_env}'"
                 )
-                if (
-                    minio_internal_host_env
-                    and minio_internal_port_env
-                    and minio_internal_port_env.strip()
-                ):
+                if minio_internal_host_env:
                     self.logger.info(
-                        f"Using MINIO_INTERNAL_HOST: {minio_internal_host_env} and MINIO_INTERNAL_PORT: {minio_internal_port_env.strip()}"
+                        f"Using MINIO_INTERNAL_HOST: {minio_internal_host_env} with fixed internal port: {fixed_internal_minio_port}"
                     )
                     # Render's internal hostnames are usually just the host, no scheme.
                     # Communication within Render's private network is typically HTTP.
                     endpoint_to_use = (
-                        f"{minio_internal_host_env}:{minio_internal_port_env.strip()}"
+                        f"{minio_internal_host_env}:{fixed_internal_minio_port}"
                     )
                     minio_secure = False  # Assume http for internal host
-                elif (
-                    minio_internal_host_env
-                ):  # If only host is set, or port is empty/whitespace
-                    self.logger.warning(
-                        f"Prod Mode: MINIO_INTERNAL_PORT ('{minio_internal_port_env}') is missing or effectively empty, even though MINIO_INTERNAL_HOST ('{minio_internal_host_env}') is set. Defaulting to port {default_minio_port} for host {minio_internal_host_env}."
-                    )
-                    endpoint_to_use = f"{minio_internal_host_env}:{default_minio_port}"
-                    minio_secure = False
                 elif minio_endpoint_env:
                     self.logger.info(
                         f"Falling back to MINIO_ENDPOINT: {minio_endpoint_env}"
@@ -75,13 +61,15 @@ class MinIOStorage:
                         endpoint_to_use = minio_endpoint_env  # Assume host:port
                 else:
                     self.logger.warning(
-                        "Neither MINIO_INTERNAL_HOST (with port) nor MINIO_ENDPOINT set in production. Defaulting to 'minio-storage:9000'."
+                        "Neither MINIO_INTERNAL_HOST nor MINIO_ENDPOINT set in production. Defaulting to 'minio-storage:{fixed_internal_minio_port}'."
                     )
-                    endpoint_to_use = f"minio-storage:{default_minio_port}"
+                    endpoint_to_use = f"minio-storage:{fixed_internal_minio_port}"
                     minio_secure = False
             else:  # Local development or other environments
                 raw_local_endpoint = (
-                    minio_endpoint_env or minio_url_env or f"minio:{default_minio_port}"
+                    minio_endpoint_env
+                    or minio_url_env
+                    or f"minio:{fixed_internal_minio_port}"
                 )
                 if raw_local_endpoint.startswith("https://"):
                     endpoint_to_use = raw_local_endpoint.replace("https://", "")
@@ -100,9 +88,7 @@ class MinIOStorage:
             print(
                 f"DEBUG_PRINT: MINIO_INTERNAL_HOST from env: '{minio_internal_host_env}'"
             )
-            print(
-                f"DEBUG_PRINT: MINIO_INTERNAL_PORT from env: '{minio_internal_port_env}'"
-            )
+            # MINIO_INTERNAL_PORT print removed
             print(
                 f"DEBUG_PRINT: MINIO_ENDPOINT (fallback) from env: '{minio_endpoint_env}'"
             )
@@ -115,9 +101,7 @@ class MinIOStorage:
             self.logger.info(
                 f"DEBUG_LOGGER: MINIO_INTERNAL_HOST from env: '{minio_internal_host_env}'"
             )
-            self.logger.info(
-                f"DEBUG_LOGGER: MINIO_INTERNAL_PORT from env: '{minio_internal_port_env}'"
-            )
+            # MINIO_INTERNAL_PORT log removed
             self.logger.info(
                 f"DEBUG_LOGGER: MINIO_ENDPOINT (fallback) from env: '{minio_endpoint_env}'"
             )

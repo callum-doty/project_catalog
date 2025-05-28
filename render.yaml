@@ -22,7 +22,7 @@ services:
     runtime: image
     image:
       url: docker.io/minio/minio:RELEASE.2023-05-04T21-44-30Z
-    dockerCommand: minio server /data --address 0.0.0.0:$PORT --console-address 0.0.0.0:9001 # Ensure MinIO listens on $PORT
+    dockerCommand: minio server /data --address 0.0.0.0:9000 --console-address 0.0.0.0:9001 # MinIO S3 API on fixed port 9000
     healthCheckPath: /minio/health/live
     region: oregon
     plan: standard # MinIO might need a paid plan for disk and resources
@@ -99,13 +99,9 @@ services:
           name: minio-storage # Match name of MinIO service
           type: web
           property: host
-      - key: MINIO_INTERNAL_PORT
-        fromService:
-          name: minio-storage
-          type: web
-          property: port
+      # MINIO_INTERNAL_PORT removed as MinIO will now consistently use 9000 internally
       - key: MINIO_ENDPOINT # Fallback, Python code will prioritize MINIO_INTERNAL_HOST
-        value: "http://minio-storage:9000" # The port MinIO listens on inside its container
+        value: "http://minio-storage:9000" # MinIO S3 API on fixed port 9000
       - key: MINIO_ACCESS_KEY
         fromService:
           name: minio-storage
@@ -156,13 +152,9 @@ services:
           name: minio-storage
           type: web
           property: host
-      - key: MINIO_INTERNAL_PORT
-        fromService:
-          name: minio-storage
-          type: web
-          property: port
+      # MINIO_INTERNAL_PORT removed as MinIO will now consistently use 9000 internally
       - key: MINIO_ENDPOINT # Fallback
-        value: "http://minio-storage:9000"
+        value: "http://minio-storage:9000" # MinIO S3 API on fixed port 9000
       - key: MINIO_ACCESS_KEY
         fromService:
           name: minio-storage
