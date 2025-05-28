@@ -330,6 +330,19 @@ def process_document(self, filename, minio_path, document_id):
                     except Exception as e:
                         logger.error(f"Failed to queue preview: {str(e)}")
 
+                    # Queue embeddings generation
+                    try:
+                        from src.catalog.tasks.embedding_tasks import (
+                            generate_embeddings,
+                        )
+
+                        generate_embeddings.delay(document_id)
+                        logger.info(
+                            f"Queued embeddings generation for document {document_id}"
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to queue embeddings generation: {str(e)}")
+
                     return True
                 except Exception as status_e:
                     logger.error(

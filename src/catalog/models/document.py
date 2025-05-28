@@ -1,10 +1,11 @@
 from src.catalog import db
 from datetime import datetime
 from sqlalchemy.dialects.postgresql import TSVECTOR
+from pgvector.sqlalchemy import Vector
 
 
 class BatchJob(db.Model):
-    __tablename__ = 'batch_jobs'
+    __tablename__ = "batch_jobs"
     id = db.Column(db.Integer, primary_key=True)
     job_name = db.Column(db.Text, nullable=False)
     start_time = db.Column(db.DateTime(timezone=True), nullable=False)
@@ -16,7 +17,7 @@ class BatchJob(db.Model):
 
 
 class Document(db.Model):
-    __tablename__ = 'documents'
+    __tablename__ = "documents"
     id = db.Column(db.Integer, primary_key=True)
     filename = db.Column(db.Text, nullable=False)
     upload_date = db.Column(db.DateTime(timezone=True), nullable=False)
@@ -24,55 +25,64 @@ class Document(db.Model):
     file_size = db.Column(db.BigInteger, nullable=False)
     page_count = db.Column(db.Integer, nullable=False)
     status = db.Column(db.Text, nullable=False)
-    batch_jobs_id = db.Column(db.Integer, db.ForeignKey('batch_jobs.id'))
+    batch_jobs_id = db.Column(db.Integer, db.ForeignKey("batch_jobs.id"))
     search_vector = db.Column(TSVECTOR)
+    embeddings = db.Column(Vector(1536), nullable=True)
 
     scorecard = db.relationship(
-        'DocumentScorecard', backref='document_parent', uselist=False, cascade="all, delete-orphan")
+        "DocumentScorecard",
+        backref="document_parent",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     llm_analysis = db.relationship(
-        'LLMAnalysis', backref='document', lazy='joined', uselist=False)
+        "LLMAnalysis", backref="document", lazy="joined", uselist=False
+    )
     extracted_text = db.relationship(
-        'ExtractedText', backref='document', lazy='joined', uselist=False)
+        "ExtractedText", backref="document", lazy="joined", uselist=False
+    )
     design_elements = db.relationship(
-        'DesignElement', backref='document', lazy='joined', uselist=False)
+        "DesignElement", backref="document", lazy="joined", uselist=False
+    )
     classification = db.relationship(
-        'Classification', backref='document', lazy='joined', uselist=False)
-    entity = db.relationship('Entity', backref='document',
-                             lazy='joined', uselist=False)
+        "Classification", backref="document", lazy="joined", uselist=False
+    )
+    entity = db.relationship("Entity", backref="document", lazy="joined", uselist=False)
     communication_focus = db.relationship(
-        'CommunicationFocus', backref='document', lazy='joined', uselist=False)
+        "CommunicationFocus", backref="document", lazy="joined", uselist=False
+    )
 
 
 class Entity(db.Model):
     """Stores entity information from the document"""
-    __tablename__ = 'entities'
+
+    __tablename__ = "entities"
     id = db.Column(db.Integer, primary_key=True)
-    document_id = db.Column(db.Integer, db.ForeignKey('documents.id'))
+    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"))
     client_name = db.Column(db.Text)
     opponent_name = db.Column(db.Text)
     creation_date = db.Column(db.Text)
     survey_question = db.Column(db.Text)
     file_identifier = db.Column(db.Text)
-    created_date = db.Column(db.DateTime(
-        timezone=True), default=datetime.utcnow)
+    created_date = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
 
 
 class CommunicationFocus(db.Model):
     """Stores the communication focus and messaging strategy"""
-    __tablename__ = 'communication_focus'
+
+    __tablename__ = "communication_focus"
     id = db.Column(db.Integer, primary_key=True)
-    document_id = db.Column(db.Integer, db.ForeignKey('documents.id'))
+    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"))
     primary_issue = db.Column(db.Text)
     secondary_issues = db.Column(db.Text)
     messaging_strategy = db.Column(db.Text)
-    created_date = db.Column(db.DateTime(
-        timezone=True), default=datetime.utcnow)
+    created_date = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
 
 
 class DesignElement(db.Model):
-    __tablename__ = 'design_elements'
+    __tablename__ = "design_elements"
     id = db.Column(db.Integer, primary_key=True)
-    document_id = db.Column(db.Integer, db.ForeignKey('documents.id'))
+    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"))
     color_scheme = db.Column(db.Text)
     theme = db.Column(db.Text)
     mail_piece_type = db.Column(db.Text)
@@ -85,9 +95,9 @@ class DesignElement(db.Model):
 
 
 class LLMAnalysis(db.Model):
-    __tablename__ = 'llm_analysis'
+    __tablename__ = "llm_analysis"
     id = db.Column(db.Integer, primary_key=True)
-    document_id = db.Column(db.Integer, db.ForeignKey('documents.id'))
+    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"))
     summary_description = db.Column(db.Text)
     visual_analysis = db.Column(db.Text)
     content_analysis = db.Column(db.Text)
@@ -97,46 +107,47 @@ class LLMAnalysis(db.Model):
     confidence_score = db.Column(db.Float)
     analysis_date = db.Column(db.DateTime(timezone=True))
     model_version = db.Column(db.Text)
+    embeddings = db.Column(Vector(1536), nullable=True)
 
-    keywords = db.relationship('LLMKeyword', backref='analysis', lazy='joined')
+    keywords = db.relationship("LLMKeyword", backref="analysis", lazy="joined")
 
 
 class Client(db.Model):
-    __tablename__ = 'clients'
+    __tablename__ = "clients"
     id = db.Column(db.Integer, primary_key=True)
     client_name = db.Column(db.Text)
     campaign_name = db.Column(db.Text)
     created_date = db.Column(db.DateTime(timezone=True))
     notes = db.Column(db.Text)
-    document_id = db.Column(db.Integer, db.ForeignKey('documents.id'))
+    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"))
 
 
 class LLMKeyword(db.Model):
-    __tablename__ = 'llm_keywords'
+    __tablename__ = "llm_keywords"
     id = db.Column(db.Integer, primary_key=True)
-    llm_analysis_id = db.Column(db.Integer, db.ForeignKey('llm_analysis.id'))
+    llm_analysis_id = db.Column(db.Integer, db.ForeignKey("llm_analysis.id"))
     keyword = db.Column(db.Text)
     category = db.Column(db.Text)
     relevance_score = db.Column(db.BigInteger)
-    taxonomy_id = db.Column(db.Integer, db.ForeignKey(
-        'keyword_taxonomy.id'), nullable=True)
-    taxonomy = db.relationship(
-        'KeywordTaxonomy', backref='llm_keywords', lazy='joined')
+    taxonomy_id = db.Column(
+        db.Integer, db.ForeignKey("keyword_taxonomy.id"), nullable=True
+    )
+    taxonomy = db.relationship("KeywordTaxonomy", backref="llm_keywords", lazy="joined")
 
 
 class Classification(db.Model):
-    __tablename__ = 'classifications'
+    __tablename__ = "classifications"
     id = db.Column(db.Integer, primary_key=True)
-    document_id = db.Column(db.Integer, db.ForeignKey('documents.id'))
+    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"))
     category = db.Column(db.Text)
     confidence = db.Column(db.BigInteger)
     classification_date = db.Column(db.DateTime(timezone=True))
 
 
 class ExtractedText(db.Model):
-    __tablename__ = 'extracted_text'
+    __tablename__ = "extracted_text"
     id = db.Column(db.Integer, primary_key=True)
-    document_id = db.Column(db.Integer, db.ForeignKey('documents.id'))
+    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"))
     page_number = db.Column(db.Integer)
     text_content = db.Column(db.Text)
     main_message = db.Column(db.Text)
@@ -149,11 +160,11 @@ class ExtractedText(db.Model):
 
 
 class DropboxSync(db.Model):
-    __tablename__ = 'dropbox_syncs'
+    __tablename__ = "dropbox_syncs"
 
     id = db.Column(db.Integer, primary_key=True)
-    document_id = db.Column(db.Integer, db.ForeignKey('documents.id'))
+    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"))
     dropbox_file_id = db.Column(db.String(255), unique=True)
     dropbox_path = db.Column(db.String(512))
     sync_date = db.Column(db.DateTime(timezone=True))
-    status = db.Column(db.String(50), default='SYNCED')
+    status = db.Column(db.String(50), default="SYNCED")
