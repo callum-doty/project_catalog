@@ -1,4 +1,3 @@
-
 from .celery_app import celery_app, logger
 from src.catalog.models import Document
 from src.catalog.services.storage_service import MinIOStorage
@@ -9,7 +8,7 @@ preview_service = PreviewService()
 storage = MinIOStorage()
 
 
-@celery_app.task(name='tasks.generate_preview')
+@celery_app.task(name="tasks.generate_preview")
 def generate_preview(filename, document_id=None):
     """
     Asynchronously generate and cache a preview for a document
@@ -33,17 +32,18 @@ def generate_preview(filename, document_id=None):
 
             # Update document if ID provided
             if document_id:
-                from catalog.models import Document
+                from src.catalog.models import Document
+
                 document = Document.query.get(document_id)
                 if document:
                     document.has_preview = True
                     db.session.commit()
 
-        logger.info(
-            f"Successfully generated and cached preview for {filename}")
+        logger.info(f"Successfully generated and cached preview for {filename}")
         return True
 
     except Exception as e:
         logger.error(
-            f"Error generating preview for {filename}: {str(e)}", exc_info=True)
+            f"Error generating preview for {filename}: {str(e)}", exc_info=True
+        )
         return False
