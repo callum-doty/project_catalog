@@ -585,7 +585,7 @@ class SearchService:
                         continue
                     # Count documents linked to this primary_category and subcategory via LLMKeyword
                     count = (
-                        db.session.query(func.count(LLMKeyword.document_id.distinct()))
+                        db.session.query(func.count(LLMAnalysis.document_id.distinct()))
                         .join(LLMAnalysis, LLMKeyword.llm_analysis_id == LLMAnalysis.id)
                         .join(
                             KeywordTaxonomy,
@@ -628,7 +628,7 @@ class SearchService:
                         continue
                     # Count documents linked to this primary_category, subcategory, and term via LLMKeyword
                     count = (
-                        db.session.query(func.count(LLMKeyword.document_id.distinct()))
+                        db.session.query(func.count(LLMAnalysis.document_id.distinct()))
                         .join(LLMAnalysis, LLMKeyword.llm_analysis_id == LLMAnalysis.id)
                         .join(
                             KeywordTaxonomy,
