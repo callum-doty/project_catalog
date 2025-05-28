@@ -1,4 +1,3 @@
-
 import os
 from pdf2image import convert_from_bytes
 from PIL import Image, ImageDraw, ImageFont
@@ -16,11 +15,11 @@ from src.catalog.constants import CACHE_TIMEOUTS, SUPPORTED_FILE_TYPES
 class PreviewService:
     def __init__(self):
         self.storage = MinIOStorage()
-        self.supported_images = SUPPORTED_FILE_TYPES['IMAGES']
-        self.supported_pdfs = SUPPORTED_FILE_TYPES['DOCUMENTS']
+        self.supported_images = SUPPORTED_FILE_TYPES["IMAGES"]
+        self.supported_pdfs = SUPPORTED_FILE_TYPES["DOCUMENTS"]
         self.logger = logging.getLogger(__name__)
 
-    @cache.memoize(timeout=CACHE_TIMEOUTS['PREVIEW'])
+    @cache.memoize(timeout=CACHE_TIMEOUTS["PREVIEW"])
     def get_preview(self, filename):
         """Get preview for a file, first checking cache"""
         try:
@@ -36,7 +35,8 @@ class PreviewService:
             in_progress_key = f"preview_in_progress:{filename}"
             if cache.get(in_progress_key):
                 self.logger.info(
-                    f"Preview generation for {filename} already in progress, returning placeholder")
+                    f"Preview generation for {filename} already in progress, returning placeholder"
+                )
                 return self._generate_placeholder_preview("Preview being generated...")
 
             # Mark as in progress (1 minute timeout to prevent deadlocks)
@@ -44,21 +44,21 @@ class PreviewService:
 
             # Queue background task for preview generation
             from src.catalog.tasks.preview_tasks import generate_preview
+
             generate_preview.delay(filename)
 
             # Generate preview synchronously for immediate display just this once
             return self._generate_preview_internal(filename)
 
         except Exception as e:
-            self.logger.error(
-                f"Preview error for {filename}: {str(e)}", exc_info=True)
+            self.logger.error(f"Preview error for {filename}: {str(e)}", exc_info=True)
             return self._generate_placeholder_preview("Error generating preview")
 
     def _generate_image_preview(self, file_data, filename):
         """Generate preview for image files"""
         try:
             # Create a temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
                 temp_path = temp_file.name
                 temp_file.write(file_data)
 
@@ -67,8 +67,8 @@ class PreviewService:
                 image = Image.open(temp_path)
 
                 # Convert RGBA to RGB if necessary
-                if image.mode in ('RGBA', 'LA'):
-                    background = Image.new('RGB', image.size, (255, 255, 255))
+                if image.mode in ("RGBA", "LA"):
+                    background = Image.new("RGB", image.size, (255, 255, 255))
                     background.paste(image, mask=image.split()[-1])
                     image = background
 
@@ -82,11 +82,14 @@ class PreviewService:
                 img_str = base64.b64encode(buffered.getvalue()).decode()
 
                 self.logger.info(
-                    f"Successfully generated image preview, size: {len(img_str)} chars")
+                    f"Successfully generated image preview, size: {len(img_str)} chars"
+                )
                 return f"data:image/jpeg;base64,{img_str}"
             except Exception as e:
                 self.logger.error(f"Error processing image: {str(e)}")
-                return self._generate_placeholder_preview(f"Error processing: {os.path.basename(filename)}")
+                return self._generate_placeholder_preview(
+                    f"Error processing: {os.path.basename(filename)}"
+                )
             finally:
                 # Clean up temporary file
                 if os.path.exists(temp_path):
@@ -94,14 +97,17 @@ class PreviewService:
 
         except Exception as e:
             self.logger.error(
-                f"Image preview generation error: {str(e)}", exc_info=True)
-            return self._generate_placeholder_preview(f"Error: {os.path.basename(filename)}")
+                f"Image preview generation error: {str(e)}", exc_info=True
+            )
+            return self._generate_placeholder_preview(
+                f"Error: {os.path.basename(filename)}"
+            )
 
     def _generate_pdf_preview(self, file_data, filename):
         """Generate preview for PDF files"""
         try:
             # Create a temporary file for the PDF
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
                 temp_path = temp_file.name
                 temp_file.write(file_data)
 
@@ -113,15 +119,20 @@ class PreviewService:
                         first_page=1,
                         last_page=1,
                         dpi=72,  # Lower DPI for preview
-                        size=(300, None)
+                        size=(300, None),
+                        poppler_path="/usr/bin",  # Explicitly set Poppler path
                     )
                 except Exception as e:
                     self.logger.error(f"PDF conversion failed: {str(e)}")
-                    return self._generate_placeholder_preview(f"PDF conversion failed: {os.path.basename(filename)}")
+                    return self._generate_placeholder_preview(
+                        f"PDF conversion failed: {os.path.basename(filename)}"
+                    )
 
                 if not images:
                     self.logger.error("No images extracted from PDF")
-                    return self._generate_placeholder_preview(f"Empty PDF: {os.path.basename(filename)}")
+                    return self._generate_placeholder_preview(
+                        f"Empty PDF: {os.path.basename(filename)}"
+                    )
 
                 image = images[0]
 
@@ -131,41 +142,52 @@ class PreviewService:
                 img_str = base64.b64encode(buffered.getvalue()).decode()
 
                 self.logger.info(
-                    f"Successfully generated PDF preview, size: {len(img_str)} chars")
+                    f"Successfully generated PDF preview, size: {len(img_str)} chars"
+                )
                 return f"data:image/jpeg;base64,{img_str}"
             except Exception as e:
                 self.logger.error(f"PDF preview error: {str(e)}")
                 tb = traceback.format_exc()
                 self.logger.error(f"PDF preview traceback: {tb}")
-                return self._generate_placeholder_preview(f"Error: {os.path.basename(filename)}")
+                return self._generate_placeholder_preview(
+                    f"Error: {os.path.basename(filename)}"
+                )
             finally:
                 # Clean up temporary file
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
 
         except Exception as e:
-            self.logger.error(
-                f"PDF preview generation error: {str(e)}", exc_info=True)
-            return self._generate_placeholder_preview(f"Error: {os.path.basename(filename)}")
+            self.logger.error(f"PDF preview generation error: {str(e)}", exc_info=True)
+            return self._generate_placeholder_preview(
+                f"Error: {os.path.basename(filename)}"
+            )
 
     def _generate_placeholder_preview(self, message="No preview available"):
         """Generate a placeholder image when preview generation fails"""
         try:
             # Create a blank image with text
             width, height = 300, 300
-            image = Image.new('RGB', (width, height), color=(240, 240, 240))
+            image = Image.new("RGB", (width, height), color=(240, 240, 240))
             draw = ImageDraw.Draw(image)
 
             # Draw a document icon
-            icon_box = [(width/2-50, height/2-60), (width/2+50, height/2+30)]
-            draw.rectangle(icon_box, fill=(220, 220, 220),
-                           outline=(180, 180, 180), width=2)
+            icon_box = [
+                (width / 2 - 50, height / 2 - 60),
+                (width / 2 + 50, height / 2 + 30),
+            ]
+            draw.rectangle(
+                icon_box, fill=(220, 220, 220), outline=(180, 180, 180), width=2
+            )
 
             # Add lines to represent text
             for i in range(3):
-                line_y = height/2 - 30 + i*15
-                draw.line([(width/2-30, line_y), (width/2+30, line_y)],
-                          fill=(180, 180, 180), width=2)
+                line_y = height / 2 - 30 + i * 15
+                draw.line(
+                    [(width / 2 - 30, line_y), (width / 2 + 30, line_y)],
+                    fill=(180, 180, 180),
+                    width=2,
+                )
 
             # Add message text
             try:
@@ -176,7 +198,7 @@ class PreviewService:
                 font = ImageFont.load_default()
 
             text_width = draw.textlength(message, font=font)
-            text_position = ((width - text_width) / 2, height/2 + 50)
+            text_position = ((width - text_width) / 2, height / 2 + 50)
             draw.text(text_position, message, font=font, fill=(100, 100, 100))
 
             # Convert to base64
@@ -192,10 +214,12 @@ class PreviewService:
             svg = '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300">'
             svg += '<rect width="300" height="300" fill="#f0f0f0"/>'
             svg += '<text x="150" y="150" font-family="sans-serif" font-size="12" text-anchor="middle" fill="#646464">'
-            svg += 'No preview available'
-            svg += '</text></svg>'
+            svg += "No preview available"
+            svg += "</text></svg>"
 
-            return f"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}"
+            return (
+                f"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}"
+            )
 
     def _generate_preview_internal(self, filename):
         """Generate preview for a file"""
@@ -217,9 +241,12 @@ class PreviewService:
                 return self._generate_pdf_preview(file_data, filename)
 
             else:
-                return self._generate_placeholder_preview(f"Unsupported file type: {ext}")
+                return self._generate_placeholder_preview(
+                    f"Unsupported file type: {ext}"
+                )
 
         except Exception as e:
             self.logger.error(
-                f"Error generating preview for {filename}: {str(e)}", exc_info=True)
+                f"Error generating preview for {filename}: {str(e)}", exc_info=True
+            )
             return self._generate_placeholder_preview("Error generating preview")
