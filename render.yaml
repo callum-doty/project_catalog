@@ -76,6 +76,7 @@ services:
     buildCommand: |
       pip install --upgrade pip
       pip install -r requirements.txt
+      python scripts/initialize_taxonomy.py
       # flask db upgrade # Or your migration command
     startCommand: "sh start.sh" # Your existing start command
     healthCheckPath: "/password-check"
