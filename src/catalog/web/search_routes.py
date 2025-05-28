@@ -1,5 +1,3 @@
-
-
 from src.catalog.utils.query_builders import (
     build_document_with_relationships_query,
     filter_by_document_type,
@@ -7,7 +5,7 @@ from src.catalog.utils.query_builders import (
     filter_by_location,
     filter_by_taxonomy,
     apply_sorting,
-    apply_pagination
+    apply_pagination,
 )
 from flask import Blueprint, render_template, request, jsonify, current_app
 from src.catalog.services.search_service import SearchService
@@ -18,35 +16,34 @@ from src.catalog.models import Document
 import time
 from src.catalog.models import LLMAnalysis, LLMKeyword, KeywordTaxonomy
 
-search_routes = Blueprint('search_routes', __name__)
+search_routes = Blueprint("search_routes", __name__)
 search_service = SearchService()
 
 
-@search_routes.route('/')
+@search_routes.route("/")
 @monitor_query
-@cache.cached(timeout=CACHE_TIMEOUTS['SEARCH'], query_string=True)
+@cache.cached(timeout=CACHE_TIMEOUTS["SEARCH"], query_string=True)
 def search_documents():
     """Search documents with multiple strategies and filters"""
     start_time = time.time()
 
     try:
         # Extract all parameters from the request
-        query = request.args.get('q', '')
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 12, type=int)
-        sort_by = request.args.get('sort_by', 'upload_date')
-        sort_direction = request.args.get('sort_dir', 'desc')
-        filter_type = request.args.get('filter_type', '')
-        filter_year = request.args.get('filter_year', '')
-        filter_location = request.args.get('filter_location', '')
-        primary_category = request.args.get('primary_category', '')
-        subcategory = request.args.get('subcategory', '')
-        specific_term = request.args.get('specific_term', '')
+        query = request.args.get("q", "")
+        page = request.args.get("page", 1, type=int)
+        per_page = request.args.get("per_page", 12, type=int)
+        sort_by = request.args.get("sort_by", "upload_date")
+        sort_direction = request.args.get("sort_dir", "desc")
+        filter_type = request.args.get("filter_type", "")
+        filter_year = request.args.get("filter_year", "")
+        filter_location = request.args.get("filter_location", "")
+        primary_category = request.args.get("primary_category", "")
+        subcategory = request.args.get("subcategory", "")
+        specific_term = request.args.get("specific_term", "")
 
         # Default values
         expanded_query = None
-        taxonomy_facets = {'primary_categories': [],
-                           'subcategories': [], 'terms': []}
+        taxonomy_facets = {"primary_categories": [], "subcategories": [], "terms": []}
 
         # Step 1: Get document IDs matching the search query
         document_ids = []
@@ -62,8 +59,7 @@ def search_documents():
                 expanded_query_list = [expanded_query]
 
             # Based on search strategy, get matching document IDs
-            document_ids = search_service.search_document_ids(
-                query, expanded_query)
+            document_ids = search_service.search_document_ids(query, expanded_query)
 
         # Step 2: Build base query for documents with relationships
         if query and document_ids:
@@ -89,12 +85,11 @@ def search_documents():
         if primary_category:
             try:
                 # Create the taxonomy query to get matching document IDs
-                taxonomy_query = db.session.query(LLMAnalysis.document_id).join(
-                    LLMKeyword, LLMKeyword.llm_analysis_id == LLMAnalysis.id
-                ).join(
-                    KeywordTaxonomy, LLMKeyword.taxonomy_id == KeywordTaxonomy.id
-                ).filter(
-                    KeywordTaxonomy.primary_category == primary_category
+                taxonomy_query = (
+                    db.session.query(LLMAnalysis.document_id)
+                    .join(LLMKeyword, LLMKeyword.llm_analysis_id == LLMAnalysis.id)
+                    .join(KeywordTaxonomy, LLMKeyword.taxonomy_id == KeywordTaxonomy.id)
+                    .filter(KeywordTaxonomy.primary_category == primary_category)
                 )
 
                 # Apply subcategory filter if present
@@ -110,26 +105,26 @@ def search_documents():
                     )
 
                 # Use the taxonomy query to filter document IDs
-                taxonomy_ids = taxonomy_query.distinct().subquery()
-                base_query = base_query.filter(Document.id.in_(taxonomy_ids))
+                taxonomy_ids_subquery = taxonomy_query.distinct().subquery()
+                base_query = base_query.filter(
+                    Document.id.in_(taxonomy_ids_subquery.select())
+                )
 
             except Exception as e:
-                current_app.logger.error(
-                    f"Error applying taxonomy filter: {str(e)}")
+                current_app.logger.error(f"Error applying taxonomy filter: {str(e)}")
                 # If there's an error, try using the filter_by_taxonomy function as fallback
                 base_query = filter_by_taxonomy(
                     base_query,
                     primary_category=primary_category,
                     subcategory=subcategory,
-                    specific_term=specific_term
+                    specific_term=specific_term,
                 )
 
         # Step 4: Apply sorting and pagination
         sorted_query = apply_sorting(base_query, sort_by, sort_direction)
 
         # Get total count and apply pagination
-        paginated_query, pagination = apply_pagination(
-            sorted_query, page, per_page)
+        paginated_query, pagination = apply_pagination(sorted_query, page, per_page)
 
         # Step 5: Get documents
         documents = paginated_query.all()
@@ -140,45 +135,54 @@ def search_documents():
         if document_ids:
             # Get hierarchical keywords for all documents
             all_keywords = search_service.get_document_hierarchical_keywords_bulk(
-                document_ids)
+                document_ids
+            )
 
             # Format documents for display
             formatted_documents = search_service._format_documents_for_display(
-                documents, all_keywords)
+                documents, all_keywords
+            )
 
             # Queue missing previews for generation
-            search_service._queue_missing_previews(
-                [doc.filename for doc in documents])
+            search_service._queue_missing_previews([doc.filename for doc in documents])
         else:
             formatted_documents = []
 
         # Step 7: Generate taxonomy facets for filtering
         taxonomy_facets = search_service.generate_taxonomy_facets(
-            primary_category, subcategory, specific_term)
+            primary_category, subcategory, specific_term
+        )
 
         # Calculate response time
         response_time = (time.time() - start_time) * 1000
 
         # Check for AJAX request
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
             # Return JSON for AJAX requests
-            return jsonify({
-                'results': formatted_documents,
-                'pagination': pagination,
-                'taxonomy_facets': taxonomy_facets,
-                'expanded_terms': expanded_query_list if isinstance(expanded_query, set) else expanded_query,
-                'response_time_ms': round(response_time, 2),
-                'query': query
-            })
+            return jsonify(
+                {
+                    "results": formatted_documents,
+                    "pagination": pagination,
+                    "taxonomy_facets": taxonomy_facets,
+                    "expanded_terms": (
+                        expanded_query_list
+                        if isinstance(expanded_query, set)
+                        else expanded_query
+                    ),
+                    "response_time_ms": round(response_time, 2),
+                    "query": query,
+                }
+            )
         else:
             # Return HTML for browser requests
             return render_template(
-                'pages/search.html',
+                "pages/search.html",
                 documents=formatted_documents,
                 pagination=pagination,
                 taxonomy_facets=taxonomy_facets,
-                expanded_terms=expanded_query_list if isinstance(
-                    expanded_query, set) else [],
+                expanded_terms=(
+                    expanded_query_list if isinstance(expanded_query, set) else []
+                ),
                 query=query,
                 sort_by=sort_by,
                 sort_dir=sort_direction,
@@ -188,7 +192,7 @@ def search_documents():
                 filter_type=filter_type,
                 filter_year=filter_year,
                 filter_location=filter_location,
-                response_time_ms=round(response_time, 2)
+                response_time_ms=round(response_time, 2),
             )
 
     except Exception as e:
@@ -196,32 +200,37 @@ def search_documents():
 
         response_time = (time.time() - start_time) * 1000
 
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({
-                'error': str(e),
-                'results': [],
-                'pagination': None,
-                'expanded_terms': [],
-                'response_time_ms': round(response_time, 2)
-            })
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify(
+                {
+                    "error": str(e),
+                    "results": [],
+                    "pagination": None,
+                    "expanded_terms": [],
+                    "response_time_ms": round(response_time, 2),
+                }
+            )
         else:
             return render_template(
-                'pages/search.html',
+                "pages/search.html",
                 documents=[],
                 query=query,
                 error=str(e),
-                taxonomy_facets={'primary_categories': [],
-                                 'subcategories': [], 'terms': []},
+                taxonomy_facets={
+                    "primary_categories": [],
+                    "subcategories": [],
+                    "terms": [],
+                },
                 expanded_terms=[],
-                response_time_ms=round(response_time, 2)
+                response_time_ms=round(response_time, 2),
             )
 
 
-@search_routes.route('/api/taxonomy/suggestions')
+@search_routes.route("/api/taxonomy/suggestions")
 def taxonomy_suggestions():
     """API endpoint for taxonomy term suggestions/autocomplete"""
     try:
-        query = request.args.get('q', '')
+        query = request.args.get("q", "")
         if not query or len(query) < 2:
             return jsonify([])
 
@@ -229,12 +238,11 @@ def taxonomy_suggestions():
         suggestions = search_service.get_taxonomy_suggestions(query)
         return jsonify(suggestions)
     except Exception as e:
-        current_app.logger.error(
-            f"Error getting taxonomy suggestions: {str(e)}")
+        current_app.logger.error(f"Error getting taxonomy suggestions: {str(e)}")
         return jsonify([])
 
 
-@search_routes.route('/api/taxonomy/related-terms/<int:term_id>')
+@search_routes.route("/api/taxonomy/related-terms/<int:term_id>")
 def related_taxonomy_terms(term_id):
     """Get related taxonomy terms for a given term ID"""
     try:
