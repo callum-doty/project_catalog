@@ -36,21 +36,28 @@ class MinIOStorage:
             endpoint_to_use = None
 
             if flask_env == "production":
-                if minio_internal_host_env and minio_internal_port_env:
+                self.logger.info(
+                    f"Prod Mode Check: MINIO_INTERNAL_HOST='{minio_internal_host_env}', MINIO_INTERNAL_PORT='{minio_internal_port_env}' (type: {type(minio_internal_port_env)}), MINIO_ENDPOINT='{minio_endpoint_env}'"
+                )
+                if (
+                    minio_internal_host_env
+                    and minio_internal_port_env
+                    and minio_internal_port_env.strip()
+                ):
                     self.logger.info(
-                        f"Using MINIO_INTERNAL_HOST: {minio_internal_host_env} and MINIO_INTERNAL_PORT: {minio_internal_port_env}"
+                        f"Using MINIO_INTERNAL_HOST: {minio_internal_host_env} and MINIO_INTERNAL_PORT: {minio_internal_port_env.strip()}"
                     )
                     # Render's internal hostnames are usually just the host, no scheme.
                     # Communication within Render's private network is typically HTTP.
                     endpoint_to_use = (
-                        f"{minio_internal_host_env}:{minio_internal_port_env}"
+                        f"{minio_internal_host_env}:{minio_internal_port_env.strip()}"
                     )
                     minio_secure = False  # Assume http for internal host
                 elif (
                     minio_internal_host_env
-                ):  # If only host is set, fallback to default port (less ideal)
+                ):  # If only host is set, or port is empty/whitespace
                     self.logger.warning(
-                        f"MINIO_INTERNAL_HOST ({minio_internal_host_env}) is set, but MINIO_INTERNAL_PORT is not. Using default port {default_minio_port}."
+                        f"Prod Mode: MINIO_INTERNAL_PORT ('{minio_internal_port_env}') is missing or effectively empty, even though MINIO_INTERNAL_HOST ('{minio_internal_host_env}') is set. Defaulting to port {default_minio_port} for host {minio_internal_host_env}."
                     )
                     endpoint_to_use = f"{minio_internal_host_env}:{default_minio_port}"
                     minio_secure = False
