@@ -185,7 +185,7 @@ services:
     name: project-catalog-cron
     env: python
     region: oregon
-    plan: free
+    plan: starter # Changed 'free' to 'starter'
     schedule: "0 * * * *"
     startCommand: "celery -A src.catalog.tasks.celery_app beat -s ./celerybeat-schedule --loglevel=INFO" # Changed 'command' to 'startCommand'
     envVars:
