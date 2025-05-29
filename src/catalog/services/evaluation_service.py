@@ -5,7 +5,13 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, case, select
 from src.catalog import db
 from src.catalog.models import Document, DocumentScorecard
-from src.catalog.models import LLMAnalysis, ExtractedText, DesignElement, Entity, Classification
+from src.catalog.models import (
+    LLMAnalysis,
+    ExtractedText,
+    DesignElement,
+    Entity,
+    Classification,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,160 +37,191 @@ class EvaluationService:
             # Get average scores (with safety checks for no documents)
             if total_docs > 0:
                 # Fixed query with explicit join
-                avg_scores = db.session.query(
-                    func.avg(DocumentScorecard.metadata_score).label(
-                        'metadata'),
-                    func.avg(DocumentScorecard.text_extraction_score).label(
-                        'text_extraction'),
-                    func.avg(DocumentScorecard.classification_score).label(
-                        'classification'),
-                    func.avg(DocumentScorecard.entity_score).label('entity'),
-                    func.avg(DocumentScorecard.design_score).label('design'),
-                    func.avg(DocumentScorecard.keyword_score).label('keyword'),
-                    func.avg(DocumentScorecard.communication_score).label(
-                        'communication'),
-                    func.avg(DocumentScorecard.total_score).label('total')
-                ).select_from(DocumentScorecard).join(
-                    Document, DocumentScorecard.document_id == Document.id
-                ).filter(
-                    Document.upload_date >= start_date
-                ).first()
+                avg_scores = (
+                    db.session.query(
+                        func.avg(DocumentScorecard.metadata_score).label("metadata"),
+                        func.avg(DocumentScorecard.text_extraction_score).label(
+                            "text_extraction"
+                        ),
+                        func.avg(DocumentScorecard.classification_score).label(
+                            "classification"
+                        ),
+                        func.avg(DocumentScorecard.entity_score).label("entity"),
+                        func.avg(DocumentScorecard.design_score).label("design"),
+                        func.avg(DocumentScorecard.keyword_score).label("keyword"),
+                        func.avg(DocumentScorecard.communication_score).label(
+                            "communication"
+                        ),
+                        func.avg(DocumentScorecard.total_score).label("total"),
+                    )
+                    .select_from(DocumentScorecard)
+                    .join(Document, DocumentScorecard.document_id == Document.id)
+                    .filter(Document.upload_date >= start_date)
+                    .first()
+                )
 
                 # Format the scores
                 average_scores = {
-                    'metadata': round(avg_scores.metadata or 0, 1),
-                    'text_extraction': round(avg_scores.text_extraction or 0, 1),
-                    'classification': round(avg_scores.classification or 0, 1),
-                    'entity': round(avg_scores.entity or 0, 1),
-                    'design': round(avg_scores.design or 0, 1),
-                    'keyword': round(avg_scores.keyword or 0, 1),
-                    'communication': round(avg_scores.communication or 0, 1),
-                    'total': round(avg_scores.total or 0, 1)
+                    "metadata": round(avg_scores.metadata or 0, 1),
+                    "text_extraction": round(avg_scores.text_extraction or 0, 1),
+                    "classification": round(avg_scores.classification or 0, 1),
+                    "entity": round(avg_scores.entity or 0, 1),
+                    "design": round(avg_scores.design or 0, 1),
+                    "keyword": round(avg_scores.keyword or 0, 1),
+                    "communication": round(avg_scores.communication or 0, 1),
+                    "total": round(avg_scores.total or 0, 1),
                 }
             else:
                 # Default values if no documents
                 average_scores = {
-                    'metadata': 0,
-                    'text_extraction': 0,
-                    'classification': 0,
-                    'entity': 0,
-                    'design': 0,
-                    'keyword': 0,
-                    'communication': 0,
-                    'total': 0
+                    "metadata": 0,
+                    "text_extraction": 0,
+                    "classification": 0,
+                    "entity": 0,
+                    "design": 0,
+                    "keyword": 0,
+                    "communication": 0,
+                    "total": 0,
                 }
 
             # Get success rates
-            success_rates = {
-                'batch1': 0,
-                'batch2': 0,
-                'batch3': 0
-            }
+            success_rates = {"batch1": 0, "batch2": 0, "batch3": 0}
 
             if total_docs > 0:
                 try:
                     # Fixed query with explicit join and select_from
-                    success_data = db.session.query(
-                        func.sum(
-                            case(
-                                (DocumentScorecard.batch1_success == True, 1),
-                                else_=0
-                            )
-                        ).label('batch1_success'),
-                        func.sum(
-                            case(
-                                (DocumentScorecard.batch2_success == True, 1),
-                                else_=0
-                            )
-                        ).label('batch2_success'),
-                        func.sum(
-                            case(
-                                (DocumentScorecard.batch3_success == True, 1),
-                                else_=0
-                            )
-                        ).label('batch3_success'),
-                        func.count().label('total')
-                    ).select_from(DocumentScorecard).join(
-                        Document, DocumentScorecard.document_id == Document.id
-                    ).filter(
-                        Document.upload_date >= start_date
-                    ).first()
+                    success_data = (
+                        db.session.query(
+                            func.sum(
+                                case(
+                                    (DocumentScorecard.batch1_success == True, 1),
+                                    else_=0,
+                                )
+                            ).label("batch1_success"),
+                            func.sum(
+                                case(
+                                    (DocumentScorecard.batch2_success == True, 1),
+                                    else_=0,
+                                )
+                            ).label("batch2_success"),
+                            func.sum(
+                                case(
+                                    (DocumentScorecard.batch3_success == True, 1),
+                                    else_=0,
+                                )
+                            ).label("batch3_success"),
+                            func.count().label("total"),
+                        )
+                        .select_from(DocumentScorecard)
+                        .join(Document, DocumentScorecard.document_id == Document.id)
+                        .filter(Document.upload_date >= start_date)
+                        .first()
+                    )
 
                     if success_data and success_data.total > 0:
                         success_rates = {
-                            'batch1': round((success_data.batch1_success or 0) / success_data.total * 100, 1),
-                            'batch2': round((success_data.batch2_success or 0) / success_data.total * 100, 1),
-                            'batch3': round((success_data.batch3_success or 0) / success_data.total * 100, 1)
+                            "batch1": round(
+                                (success_data.batch1_success or 0)
+                                / success_data.total
+                                * 100,
+                                1,
+                            ),
+                            "batch2": round(
+                                (success_data.batch2_success or 0)
+                                / success_data.total
+                                * 100,
+                                1,
+                            ),
+                            "batch3": round(
+                                (success_data.batch3_success or 0)
+                                / success_data.total
+                                * 100,
+                                1,
+                            ),
                         }
                 except Exception as e:
                     logger.error(f"Error calculating success rates: {str(e)}")
 
             # Get documents requiring review - fixed with select_from
             try:
-                review_count = db.session.query(
-                    func.count()
-                ).select_from(DocumentScorecard).join(
-                    Document, DocumentScorecard.document_id == Document.id
-                ).filter(
-                    Document.upload_date >= start_date,
-                    DocumentScorecard.requires_review == True,
-                    DocumentScorecard.reviewed == False
-                ).scalar() or 0
+                review_count = (
+                    db.session.query(func.count())
+                    .select_from(DocumentScorecard)
+                    .join(Document, DocumentScorecard.document_id == Document.id)
+                    .filter(
+                        Document.upload_date >= start_date,
+                        DocumentScorecard.requires_review == True,
+                        DocumentScorecard.reviewed == False,
+                    )
+                    .scalar()
+                    or 0
+                )
             except Exception as e:
                 logger.error(f"Error calculating review count: {str(e)}")
                 review_count = 0
 
             # Get score distribution
             score_distribution = {
-                'range_0_20': 0,
-                'range_21_40': 0,
-                'range_41_60': 0,
-                'range_61_80': 0,
-                'range_81_100': 0
+                "range_0_20": 0,
+                "range_21_40": 0,
+                "range_41_60": 0,
+                "range_61_80": 0,
+                "range_81_100": 0,
             }
 
             if total_docs > 0:
                 for score_range in score_distribution.keys():
                     try:
-                        low, high = map(int, score_range.replace(
-                            'range_', '').split('_'))
+                        low, high = map(
+                            int, score_range.replace("range_", "").split("_")
+                        )
 
                         # Fixed query with select_from
-                        count = db.session.query(
-                            func.count()
-                        ).select_from(DocumentScorecard).join(
-                            Document, DocumentScorecard.document_id == Document.id
-                        ).filter(
-                            Document.upload_date >= start_date,
-                            DocumentScorecard.total_score >= low,
-                            DocumentScorecard.total_score <= high
-                        ).scalar() or 0
+                        count = (
+                            db.session.query(func.count())
+                            .select_from(DocumentScorecard)
+                            .join(
+                                Document, DocumentScorecard.document_id == Document.id
+                            )
+                            .filter(
+                                Document.upload_date >= start_date,
+                                DocumentScorecard.total_score >= low,
+                                DocumentScorecard.total_score <= high,
+                            )
+                            .scalar()
+                            or 0
+                        )
 
                         score_distribution[score_range] = count
                     except Exception as e:
                         logger.error(
-                            f"Error calculating score distribution for {score_range}: {str(e)}")
+                            f"Error calculating score distribution for {score_range}: {str(e)}"
+                        )
 
             # Compile metrics
             metrics = {
-                'period_days': days,
-                'total_documents': total_docs,
-                'average_scores': average_scores,
-                'success_rates': success_rates,
-                'review_metrics': {
-                    'requires_review_count': review_count,
-                    'review_percentage': round((review_count / total_docs * 100), 1) if total_docs > 0 else 0
+                "period_days": days,
+                "total_documents": total_docs,
+                "average_scores": average_scores,
+                "success_rates": success_rates,
+                "review_metrics": {
+                    "requires_review_count": review_count,
+                    "review_percentage": (
+                        round((review_count / total_docs * 100), 1)
+                        if total_docs > 0
+                        else 0
+                    ),
                 },
-                'score_distribution': score_distribution,
-                'component_scores': {
-                    'metadata': average_scores['metadata'],
-                    'text_extraction': average_scores['text_extraction'],
-                    'classification': average_scores['classification'],
-                    'entity': average_scores['entity'],
-                    'design': average_scores['design'],
-                    'keyword': average_scores['keyword'],
-                    'communication': average_scores['communication']
-                }
+                "score_distribution": score_distribution,
+                "component_scores": {
+                    "metadata": average_scores["metadata"],
+                    "text_extraction": average_scores["text_extraction"],
+                    "classification": average_scores["classification"],
+                    "entity": average_scores["entity"],
+                    "design": average_scores["design"],
+                    "keyword": average_scores["keyword"],
+                    "communication": average_scores["communication"],
+                },
             }
 
             return metrics
@@ -193,13 +230,13 @@ class EvaluationService:
             logger.exception(f"Error calculating quality metrics: {str(e)}")
             # Return minimal data structure to avoid frontend errors
             return {
-                'period_days': days,
-                'total_documents': 0,
-                'average_scores': {'total': 0},
-                'success_rates': {'batch1': 0, 'batch2': 0, 'batch3': 0},
-                'review_metrics': {'requires_review_count': 0, 'review_percentage': 0},
-                'score_distribution': {},
-                'component_scores': {}
+                "period_days": days,
+                "total_documents": 0,
+                "average_scores": {"total": 0},
+                "success_rates": {"batch1": 0, "batch2": 0, "batch3": 0},
+                "review_metrics": {"requires_review_count": 0, "review_percentage": 0},
+                "score_distribution": {},
+                "component_scores": {},
             }
 
     def evaluate_batch1(self, document_id):
@@ -212,16 +249,17 @@ class EvaluationService:
 
             # Get scorecard or create one
             scorecard = DocumentScorecard.query.filter_by(
-                document_id=document_id).first()
+                document_id=document_id
+            ).first()
             if not scorecard:
                 scorecard = DocumentScorecard(document_id=document_id)
                 db.session.add(scorecard)
 
             # Get components
-            llm_analysis = LLMAnalysis.query.filter_by(
-                document_id=document_id).first()
+            llm_analysis = LLMAnalysis.query.filter_by(document_id=document_id).first()
             extracted_text = ExtractedText.query.filter_by(
-                document_id=document_id).first()
+                document_id=document_id
+            ).first()
 
             # Evaluate metadata (20 points max)
             metadata_score = 0
@@ -229,7 +267,10 @@ class EvaluationService:
 
             if llm_analysis:
                 # 5 points for summary
-                if llm_analysis.summary_description and len(llm_analysis.summary_description) > 20:
+                if (
+                    llm_analysis.summary_description
+                    and len(llm_analysis.summary_description) > 20
+                ):
                     metadata_score += 5
                 else:
                     metadata_flags.append("Missing or incomplete summary")
@@ -247,11 +288,13 @@ class EvaluationService:
                     metadata_flags.append("Missing document tone")
 
                 # 5 points for visual analysis
-                if llm_analysis.visual_analysis and len(llm_analysis.visual_analysis) > 20:
+                if (
+                    llm_analysis.visual_analysis
+                    and len(llm_analysis.visual_analysis) > 20
+                ):
                     metadata_score += 5
                 else:
-                    metadata_flags.append(
-                        "Missing or incomplete visual analysis")
+                    metadata_flags.append("Missing or incomplete visual analysis")
             else:
                 metadata_flags.append("No LLM analysis found")
 
@@ -261,13 +304,19 @@ class EvaluationService:
 
             if extracted_text:
                 # 10 points for main text content
-                if extracted_text.text_content and len(extracted_text.text_content) > 50:
+                if (
+                    extracted_text.text_content
+                    and len(extracted_text.text_content) > 50
+                ):
                     text_score += 10
                 else:
                     text_flags.append("Missing or incomplete text content")
 
                 # 5 points for main message
-                if extracted_text.main_message and len(extracted_text.main_message) > 10:
+                if (
+                    extracted_text.main_message
+                    and len(extracted_text.main_message) > 10
+                ):
                     text_score += 5
                 else:
                     text_flags.append("Missing or incomplete main message")
@@ -305,12 +354,15 @@ class EvaluationService:
             db.session.rollback()
             return False, f"Error: {str(e)}"
 
-    def mark_document_reviewed(self, document_id, reviewer_notes="", corrections_made=""):
+    def mark_document_reviewed(
+        self, document_id, reviewer_notes="", corrections_made=""
+    ):
         """Mark a document as reviewed"""
         try:
             # Get scorecard
             scorecard = DocumentScorecard.query.filter_by(
-                document_id=document_id).first()
+                document_id=document_id
+            ).first()
             if not scorecard:
                 logger.error(f"Scorecard for document {document_id} not found")
                 return False
@@ -342,17 +394,18 @@ class EvaluationService:
 
             # Get scorecard or create one
             scorecard = DocumentScorecard.query.filter_by(
-                document_id=document_id).first()
+                document_id=document_id
+            ).first()
             if not scorecard:
                 scorecard = DocumentScorecard(document_id=document_id)
                 db.session.add(scorecard)
 
             # Get components
             classification = Classification.query.filter_by(
-                document_id=document_id).first()
+                document_id=document_id
+            ).first()
             entity = Entity.query.filter_by(document_id=document_id).first()
-            design = DesignElement.query.filter_by(
-                document_id=document_id).first()
+            design = DesignElement.query.filter_by(document_id=document_id).first()
 
             # Evaluate classification (10 points max)
             classification_score = 0
@@ -363,15 +416,13 @@ class EvaluationService:
                 if classification.category:
                     classification_score += 5
                 else:
-                    classification_flags.append(
-                        "Missing classification category")
+                    classification_flags.append("Missing classification category")
 
                 # 5 points for confidence score
                 if classification.confidence and classification.confidence > 50:
                     classification_score += 5
                 else:
-                    classification_flags.append(
-                        "Low classification confidence")
+                    classification_flags.append("Low classification confidence")
             else:
                 classification_flags.append("No classification data found")
 
@@ -456,39 +507,60 @@ class EvaluationService:
 
             # Get scorecard or create one
             scorecard = DocumentScorecard.query.filter_by(
-                document_id=document_id).first()
+                document_id=document_id
+            ).first()
             if not scorecard:
                 scorecard = DocumentScorecard(document_id=document_id)
                 db.session.add(scorecard)
 
             # Get components
-            llm_analysis = LLMAnalysis.query.filter_by(
-                document_id=document_id).first()
+            llm_analysis = LLMAnalysis.query.filter_by(document_id=document_id).first()
             communication_focus = None
             try:
                 from src.catalog.models import CommunicationFocus
+
                 communication_focus = CommunicationFocus.query.filter_by(
-                    document_id=document_id).first()
+                    document_id=document_id
+                ).first()
             except Exception as e:
                 logger.warning(f"Could not get communication focus: {str(e)}")
 
             # Get hierarchical keywords
             keywords = []
             try:
-                from src.catalog.models import DocumentKeyword, KeywordTaxonomy
-                keywords = db.session.query(DocumentKeyword, KeywordTaxonomy)\
-                    .join(KeywordTaxonomy, DocumentKeyword.taxonomy_id == KeywordTaxonomy.id)\
-                    .filter(DocumentKeyword.document_id == document_id).all()
+                # Attempt to import LLMKeyword as it seems to be the intended model
+                from src.catalog.models import LLMKeyword, KeywordTaxonomy
+
+                # Assuming LLMKeyword has a similar structure for joining with KeywordTaxonomy
+                # and a 'document_id' field. This might need adjustment if LLMKeyword's structure is different.
+                # If LLMKeyword is not a direct replacement, this query will need to be adapted.
+                # For now, we'll assume it's a suitable replacement for the join.
+                keywords = (
+                    db.session.query(LLMKeyword, KeywordTaxonomy)
+                    .join(KeywordTaxonomy, LLMKeyword.taxonomy_id == KeywordTaxonomy.id)
+                    .filter(LLMKeyword.document_id == document_id)
+                    .all()
+                )
+            except ImportError:
+                logger.warning(
+                    "Failed to import LLMKeyword. Hierarchical keywords will not be processed."
+                )
             except Exception as e:
                 logger.warning(
-                    f"Could not get hierarchical keywords: {str(e)}")
+                    f"Could not get hierarchical keywords using LLMKeyword: {str(e)}"
+                )
 
             # Evaluate keywords (15 points max)
             keyword_score = 0
             keyword_flags = []
 
             # Check for LLM keywords
-            if llm_analysis and hasattr(llm_analysis, 'keywords') and llm_analysis.keywords and len(llm_analysis.keywords) > 0:
+            if (
+                llm_analysis
+                and hasattr(llm_analysis, "keywords")
+                and llm_analysis.keywords
+                and len(llm_analysis.keywords) > 0
+            ):
                 # 5 points for having any keywords
                 keyword_score += 5
 

@@ -106,30 +106,63 @@ class PreviewService:
     def _generate_pdf_preview(self, file_data, filename):
         """Generate preview for PDF files"""
         try:
-            # Create a temporary file for the PDF
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
-                temp_path = temp_file.name
-                temp_file.write(file_data)
+            self.logger.info(
+                f"Starting PDF preview for {filename}. File data type: {type(file_data)}, Length: {len(file_data) if file_data else 'N/A'}"
+            )
+            if file_data and len(file_data) > 8:
+                self.logger.info(
+                    f"First 8 bytes of file_data for {filename}: {file_data[:8]}"
+                )
+            elif file_data:
+                self.logger.info(f"File_data for {filename} is too short: {file_data}")
+            else:
+                self.logger.warning(f"File_data for {filename} is None or empty.")
+                return self._generate_placeholder_preview(
+                    f"Empty file data: {os.path.basename(filename)}"
+                )
+
+            # Create a temporary file for the PDF - This is actually not needed if using convert_from_bytes
+            # with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+            #     temp_path = temp_file.name
+            #     temp_file.write(file_data)
+            # temp_path is not used with convert_from_bytes, so removing related logic.
 
             try:
                 # Convert first page only with lower DPI for speed
                 try:
+                    self.logger.info(f"Attempting convert_from_bytes for {filename}")
                     images = convert_from_bytes(
-                        file_data,
+                        file_data,  # Pass bytes directly
                         first_page=1,
                         last_page=1,
                         dpi=72,  # Lower DPI for preview
                         size=(300, None),
                         poppler_path="/usr/bin",  # Explicitly set Poppler path
+                        timeout=10,  # Add a timeout
                     )
-                except Exception as e:
-                    self.logger.error(f"PDF conversion failed: {str(e)}")
+                    self.logger.info(
+                        f"convert_from_bytes successful for {filename}, images found: {len(images)}"
+                    )
+                except Exception as e_convert:
+                    self.logger.error(
+                        f"PDF conversion (convert_from_bytes) failed for {filename}: {str(e_convert)}",
+                        exc_info=True,
+                    )
+                    # Log specific pdf2image errors if possible
+                    if hasattr(e_convert, "stdout") and e_convert.stdout:
+                        self.logger.error(
+                            f"pdf2image stdout for {filename}: {e_convert.stdout.decode(errors='ignore')}"
+                        )
+                    if hasattr(e_convert, "stderr") and e_convert.stderr:
+                        self.logger.error(
+                            f"pdf2image stderr for {filename}: {e_convert.stderr.decode(errors='ignore')}"
+                        )
                     return self._generate_placeholder_preview(
                         f"PDF conversion failed: {os.path.basename(filename)}"
                     )
 
                 if not images:
-                    self.logger.error("No images extracted from PDF")
+                    self.logger.error(f"No images extracted from PDF for {filename}")
                     return self._generate_placeholder_preview(
                         f"Empty PDF: {os.path.basename(filename)}"
                     )
@@ -142,23 +175,26 @@ class PreviewService:
                 img_str = base64.b64encode(buffered.getvalue()).decode()
 
                 self.logger.info(
-                    f"Successfully generated PDF preview, size: {len(img_str)} chars"
+                    f"Successfully generated PDF preview for {filename}, size: {len(img_str)} chars"
                 )
                 return f"data:image/jpeg;base64,{img_str}"
-            except Exception as e:
-                self.logger.error(f"PDF preview error: {str(e)}")
-                tb = traceback.format_exc()
-                self.logger.error(f"PDF preview traceback: {tb}")
-                return self._generate_placeholder_preview(
-                    f"Error: {os.path.basename(filename)}"
+            except (
+                Exception
+            ) as e_process:  # More specific exception for image processing part
+                self.logger.error(
+                    f"Error processing extracted image for PDF {filename}: {str(e_process)}",
+                    exc_info=True,
                 )
-            finally:
-                # Clean up temporary file
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
+                return self._generate_placeholder_preview(
+                    f"Error processing PDF image: {os.path.basename(filename)}"
+                )
+            # Removed the finally block as temp_path is no longer used with convert_from_bytes
 
-        except Exception as e:
-            self.logger.error(f"PDF preview generation error: {str(e)}", exc_info=True)
+        except Exception as e_outer:  # Catch-all for the outer try block
+            self.logger.error(
+                f"Outer PDF preview generation error for {filename}: {str(e_outer)}",
+                exc_info=True,
+            )
             return self._generate_placeholder_preview(
                 f"Error: {os.path.basename(filename)}"
             )
