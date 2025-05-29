@@ -187,7 +187,7 @@ services:
     region: oregon
     plan: free
     schedule: "0 * * * *"
-    command: "celery -A src.catalog.tasks.celery_app beat -s ./celerybeat-schedule --loglevel=INFO"
+    startCommand: "celery -A src.catalog.tasks.celery_app beat -s ./celerybeat-schedule --loglevel=INFO" # Changed 'command' to 'startCommand'
     envVars:
       - key: SERVICE_TYPE
         value: "beat"
