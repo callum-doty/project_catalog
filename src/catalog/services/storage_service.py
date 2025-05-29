@@ -1,4 +1,5 @@
 from minio import Minio
+from minio.error import S3Error  # Import S3Error
 import os
 from urllib3 import PoolManager
 import io
@@ -169,14 +170,27 @@ class MinIOStorage:
             # Check if file exists first
             try:
                 self.client.stat_object(self.bucket, filename)
-            except Exception as e:
+            except S3Error as s3_err:
+                if s3_err.code == "NoSuchKey":
+                    self.logger.warning(
+                        f"File {filename} not found in MinIO (NoSuchKey). Returning placeholder."
+                    )
+                    return self._get_placeholder_image()
+                else:
+                    # Other S3 errors (permissions, etc.)
+                    self.logger.error(
+                        f"S3 error calling stat_object for {filename} in MinIO: {s3_err.code} - {str(s3_err)}"
+                    )
+                    raise  # Re-raise other S3 errors
+            except Exception as e:  # Catch other exceptions like connection errors
                 self.logger.error(
-                    f"Error calling stat_object for {filename} in MinIO: {str(e)}"
+                    f"Non-S3 error (e.g., connection issue) calling stat_object for {filename} in MinIO: {str(e)}"
                 )
-                # Return a default placeholder image if file doesn't exist
-                return self._get_placeholder_image()
+                raise  # Re-raise connection errors and other unexpected issues
 
+            # If stat_object was successful, proceed to get the object
             data = io.BytesIO()
+            # This get_object call can also raise S3Error or connection errors
             response = self.client.get_object(self.bucket, filename)
 
             for d in response.stream(32 * 1024):
@@ -185,10 +199,18 @@ class MinIOStorage:
 
             self.logger.info(f"Successfully retrieved file: {filename}")
             return data.getvalue()
-        except Exception as e:
-            self.logger.error(f"MinIO download failed: {str(e)}")
-            # Return a default placeholder image for errors
-            return self._get_placeholder_image()
+        # This outer except block will catch errors from the get_object call itself,
+        # or re-raised errors from the stat_object block.
+        except S3Error as s3_err_get:
+            self.logger.error(
+                f"MinIO S3 error during get_object for {filename}: {s3_err_get.code} - {str(s3_err_get)}"
+            )
+            raise  # Re-raise to ensure the task fails clearly
+        except Exception as e_get:
+            self.logger.error(
+                f"MinIO non-S3 error (e.g. connection) during get_object for {filename}: {str(e_get)}"
+            )
+            raise  # Re-raise to ensure the task fails clearly
 
     def _get_placeholder_image(self):
         """Return a placeholder image for missing files"""

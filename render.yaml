@@ -181,53 +181,52 @@ services:
       #   sync: false
       - key: APP_SETTINGS
         value: "src.config.ProductionConfig"
-# Cron job section remains commented out until blueprint syncs successfully
-#  - type: cron
-#    name: project-catalog-cron
-#    env: python
-#    region: oregon
-#    plan: free
-#    schedule: "0 * * * *"
-#    command: "celery -A src.catalog.tasks.celery_app beat -s ./celerybeat-schedule --loglevel=INFO"
-#    envVars:
-#      - key: SERVICE_TYPE
-#        value: "beat"
-#      - key: PYTHON_VERSION
-#        value: "3.9"
-#      - key: DATABASE_URL
-#        fromDatabase:
-#          name: project-catalog-postgres
-#          property: connectionString
-#      - key: REDIS_URL
-#        fromService:
-#          type: redis
-#          name: project-catalog-redis
-#          property: connectionString
-#      - key: MINIO_INTERNAL_HOST
-#        fromService:
-#          name: minio-storage
-#          type: web
-#          property: host
-#      - key: MINIO_ENDPOINT # Fallback
-#        value: "http://minio-storage:9000"
-#      - key: MINIO_ACCESS_KEY
-#        fromService:
-#          name: minio-storage
-#          type: web
-#          envVarKey: MINIO_ROOT_USER
-#      - key: MINIO_SECRET_KEY
-#        fromService:
-#          name: minio-storage
-#          type: web
-#          envVarKey: MINIO_ROOT_PASSWORD
-#      - key: S3_BUCKET_NAME
-#        value: "documents"
-#      - key: SECRET_KEY
-#        fromService:
-#          type: web
-#          name: project-catalog-web
-#          envVarKey: SECRET_KEY
-#      - key: FLASK_ENV
-#        value: "production"
-#      - key: APP_SETTINGS
-#        value: "src.config.ProductionConfig"
+  - type: cron
+    name: project-catalog-cron
+    env: python
+    region: oregon
+    plan: free
+    schedule: "0 * * * *"
+    command: "celery -A src.catalog.tasks.celery_app beat -s ./celerybeat-schedule --loglevel=INFO"
+    envVars:
+      - key: SERVICE_TYPE
+        value: "beat"
+      - key: PYTHON_VERSION
+        value: "3.9"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: project-catalog-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: project-catalog-redis
+          property: connectionString
+      - key: MINIO_INTERNAL_HOST
+        fromService:
+          name: minio-storage
+          type: web
+          property: host
+      - key: MINIO_ENDPOINT # Fallback
+        value: "http://minio-storage:9000"
+      - key: MINIO_ACCESS_KEY
+        fromService:
+          name: minio-storage
+          type: web
+          envVarKey: MINIO_ROOT_USER
+      - key: MINIO_SECRET_KEY
+        fromService:
+          name: minio-storage
+          type: web
+          envVarKey: MINIO_ROOT_PASSWORD
+      - key: S3_BUCKET_NAME
+        value: "documents"
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: project-catalog-web
+          envVarKey: SECRET_KEY
+      - key: FLASK_ENV
+        value: "production"
+      - key: APP_SETTINGS
+        value: "src.config.ProductionConfig"
