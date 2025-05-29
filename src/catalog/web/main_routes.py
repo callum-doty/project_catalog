@@ -838,11 +838,44 @@ def api_documents():
 def get_document_preview(filename):
     """API endpoint for fetching document previews"""
     try:
-        preview = preview_service.get_preview(filename)
-        return jsonify({"status": "success", "preview": preview})
+        preview_data = preview_service.get_preview(filename)
+
+        if preview_data == "fallback_to_direct_url":
+            # If PDF conversion failed, get the direct file URL from storage
+            direct_url = storage.get_file_url(filename)
+            if direct_url:
+                current_app.logger.info(
+                    f"PDF preview failed for {filename}, falling back to direct URL: {direct_url}"
+                )
+                return jsonify(
+                    {
+                        "status": "fallback_redirect",
+                        "url": direct_url,
+                        "filename": filename,
+                    }
+                )
+            else:
+                current_app.logger.error(
+                    f"Could not get direct URL for {filename} after fallback signal."
+                )
+                return (
+                    jsonify(
+                        {
+                            "status": "error",
+                            "message": "Preview failed and direct URL not found",
+                        }
+                    ),
+                    404,
+                )
+        else:
+            # Otherwise, return the generated preview (image or placeholder)
+            return jsonify({"status": "success", "preview": preview_data})
+
     except Exception as e:
-        current_app.logger.error(f"Preview API error for {filename}: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 404
+        current_app.logger.error(
+            f"Preview API error for {filename}: {str(e)}", exc_info=True
+        )
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @main_routes.route("/api/sync-status")

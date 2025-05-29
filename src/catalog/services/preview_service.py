@@ -157,9 +157,8 @@ class PreviewService:
                         self.logger.error(
                             f"pdf2image stderr for {filename}: {e_convert.stderr.decode(errors='ignore')}"
                         )
-                    return self._generate_placeholder_preview(
-                        f"PDF conversion failed: {os.path.basename(filename)}"
-                    )
+                    # If PDF conversion fails, signal to fallback to direct URL
+                    return "fallback_to_direct_url"
 
                 if not images:
                     self.logger.error(f"No images extracted from PDF for {filename}")

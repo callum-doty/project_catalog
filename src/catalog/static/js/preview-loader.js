@@ -64,8 +64,25 @@ document.addEventListener('DOMContentLoaded', function() {
           return response.json();
         })
         .then(data => {
-          if (data.preview) {
-            // Show the preview with fade-in effect
+          if (data.status === 'fallback_redirect' && data.url) {
+            console.log(`Using PDF fallback for ${filename}: ${data.url}`);
+            // Embed PDF using <object> tag or provide download link
+            container.innerHTML = `
+              <object data="${data.url}" type="application/pdf" class="w-full h-full">
+                <div class="flex flex-col items-center justify-center h-full p-4 text-center">
+                  <p class="mb-2 text-sm text-gray-600">Cannot display PDF preview directly in this browser.</p>
+                  <a 
+                    href="${data.url}" 
+                    download="${data.filename || 'document.pdf'}" 
+                    class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors text-sm"
+                  >
+                    Download PDF: ${data.filename || 'document.pdf'}
+                  </a>
+                </div>
+              </object>
+            `;
+          } else if (data.preview) {
+            // Show the image preview with fade-in effect
             container.innerHTML = `
               <img 
                 src="${data.preview}" 
@@ -75,8 +92,9 @@ document.addEventListener('DOMContentLoaded', function() {
               >
             `;
           } else {
-            // No preview available
-            container.innerHTML = originalContent;
+            // No preview available, restore original or show a generic placeholder
+            console.warn(`No preview or fallback for ${filename}. Data:`, data);
+            container.innerHTML = originalContent; // Or a more specific placeholder
           }
         })
         .catch(error => {
