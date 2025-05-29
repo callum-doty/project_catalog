@@ -192,7 +192,7 @@ services:
       - key: SERVICE_TYPE
         value: "beat"
       - key: PYTHON_VERSION
-        value: "3.9"
+        value: "3.9.18" # Specified full Python version
       - key: DATABASE_URL
         fromDatabase:
           name: project-catalog-postgres
