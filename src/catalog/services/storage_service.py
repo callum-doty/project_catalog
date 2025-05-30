@@ -4,6 +4,7 @@ import os
 from urllib3 import PoolManager
 import io
 import logging
+from datetime import timedelta
 
 
 class MinIOStorage:
@@ -273,3 +274,31 @@ class MinIOStorage:
         except Exception as e:
             self.logger.error(f"Error listing MinIO files: {str(e)}")
             return []
+
+    def get_presigned_url(self, filename, expires_seconds=3600):
+        """Get a presigned URL for a file in MinIO"""
+        try:
+            # Ensure client is initialized (though singleton should handle this)
+            if not self._client:
+                self.logger.warning(
+                    "MinIO client not initialized in get_presigned_url, attempting re-init."
+                )
+                self._init_client()
+
+            if not self._client:  # Still not initialized
+                self.logger.error(
+                    "MinIO client failed to initialize for get_presigned_url."
+                )
+                return None
+
+            url = self._client.presigned_get_object(
+                self.bucket, filename, expires=timedelta(seconds=expires_seconds)
+            )
+            self.logger.info(f"Successfully generated presigned URL for {filename}")
+            return url
+        except Exception as e:
+            self.logger.error(
+                f"Error generating presigned URL for {filename}: {str(e)}",
+                exc_info=True,
+            )
+            return None

@@ -841,8 +841,8 @@ def get_document_preview(filename):
         preview_data = preview_service.get_preview(filename)
 
         if preview_data == "fallback_to_direct_url":
-            # If PDF conversion failed, get the direct file URL from storage
-            direct_url = storage.get_file_url(filename)
+            # If PDF conversion failed, get a presigned URL from storage
+            direct_url = storage.get_presigned_url(filename)  # Use the new method
             if direct_url:
                 current_app.logger.info(
                     f"PDF preview failed for {filename}, falling back to direct URL: {direct_url}"
