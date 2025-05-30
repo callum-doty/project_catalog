@@ -98,9 +98,45 @@ document.addEventListener('DOMContentLoaded', function() {
           }
         })
         .catch(error => {
-          console.error('Error loading preview:', error);
-          // Restore original content on error
-          container.innerHTML = originalContent;
+          console.error('Initial error loading preview:', error);
+          // Attempt to load direct URL as a fallback
+          fetch(`/search/fallback_to_direct_url?filename=${encodeURIComponent(filename)}`)
+            .then(fallbackResponse => {
+              if (!fallbackResponse.ok) {
+                throw new Error(`Fallback fetch failed: ${fallbackResponse.status}`);
+              }
+              return fallbackResponse.json();
+            })
+            .then(fallbackData => {
+              if (fallbackData.direct_url) {
+                console.log(`Using direct URL fallback for ${filename}: ${fallbackData.direct_url}`);
+                container.innerHTML = `
+                  <div class="flex flex-col items-center justify-center h-full p-4 text-center">
+                    <p class="mb-2 text-sm text-red-600">Preview generation failed.</p>
+                    <a 
+                      href="${fallbackData.direct_url}" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors text-sm"
+                    >
+                      Open Original File: ${filename}
+                    </a>
+                  </div>
+                `;
+              } else {
+                throw new Error('Fallback URL not provided in response.');
+              }
+            })
+            .catch(fallbackError => {
+              console.error('Error loading direct URL fallback:', fallbackError);
+              // Restore original content or show a generic error message if fallback also fails
+              container.innerHTML = `
+                <div class="flex flex-col items-center justify-center h-full p-4 text-center">
+                  <p class="mb-2 text-sm text-red-600">Preview unavailable.</p>
+                  <p class="text-xs text-gray-500">Could not load preview or direct link.</p>
+                </div>
+              `;
+            });
         });
     }
     

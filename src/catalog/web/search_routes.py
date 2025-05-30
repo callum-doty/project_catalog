@@ -15,9 +15,11 @@ from src.catalog.utils import monitor_query
 from src.catalog.models import Document
 import time
 from src.catalog.models import LLMAnalysis, LLMKeyword, KeywordTaxonomy
+from src.catalog.services.storage_service import MinIOStorage  # Added import
 
 search_routes = Blueprint("search_routes", __name__)
 search_service = SearchService()
+storage_service = MinIOStorage()  # Added storage service instance
 
 
 @search_routes.route("/")
@@ -252,3 +254,31 @@ def related_taxonomy_terms(term_id):
     except Exception as e:
         current_app.logger.error(f"Error getting related terms: {str(e)}")
         return jsonify([]), 500
+
+
+@search_routes.route("/fallback_to_direct_url")
+def fallback_to_direct_url():
+    """
+    Provides a direct, presigned URL to an original document in storage.
+    This is used as a fallback when preview generation fails.
+    """
+    filename = request.args.get("filename")
+    if not filename:
+        return jsonify({"error": "Missing filename parameter"}), 400
+
+    try:
+        # Use the MinIOStorage service to get a presigned URL
+        # The MinIOStorage class is a singleton, so instantiating it
+        # will return the existing instance.
+        url = storage_service.get_presigned_url(filename)
+
+        if url:
+            return jsonify({"direct_url": url})
+        else:
+            current_app.logger.error(f"Failed to generate presigned URL for {filename}")
+            return jsonify({"error": "Could not generate direct URL"}), 500
+    except Exception as e:
+        current_app.logger.error(
+            f"Error generating presigned URL for {filename}: {str(e)}", exc_info=True
+        )
+        return jsonify({"error": "Server error generating direct URL"}), 500
