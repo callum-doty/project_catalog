@@ -182,12 +182,13 @@ class MinIOStorage:
                     self.logger.error(
                         f"S3 error calling stat_object for {filename} in MinIO: {s3_err.code} - {str(s3_err)}"
                     )
-                    raise  # Re-raise other S3 errors
+                    return None  # Return None on other S3 errors during stat
             except Exception as e:  # Catch other exceptions like connection errors
                 self.logger.error(
-                    f"Non-S3 error (e.g., connection issue) calling stat_object for {filename} in MinIO: {str(e)}"
+                    f"Non-S3 error (e.g., connection issue) calling stat_object for {filename} in MinIO: {str(e)}",
+                    exc_info=True,
                 )
-                raise  # Re-raise connection errors and other unexpected issues
+                return None  # Return None on other errors during stat
 
             # If stat_object was successful, proceed to get the object
             data = io.BytesIO()
@@ -204,14 +205,16 @@ class MinIOStorage:
         # or re-raised errors from the stat_object block.
         except S3Error as s3_err_get:
             self.logger.error(
-                f"MinIO S3 error during get_object for {filename}: {s3_err_get.code} - {str(s3_err_get)}"
+                f"MinIO S3 error during get_object for {filename}: {s3_err_get.code} - {str(s3_err_get)}",
+                exc_info=True,
             )
-            raise  # Re-raise to ensure the task fails clearly
+            return None  # Return None on S3 errors during get_object
         except Exception as e_get:
             self.logger.error(
-                f"MinIO non-S3 error (e.g. connection) during get_object for {filename}: {str(e_get)}"
+                f"MinIO non-S3 error (e.g. connection) during get_object for {filename}: {str(e_get)}",
+                exc_info=True,
             )
-            raise  # Re-raise to ensure the task fails clearly
+            return None  # Return None on other errors during get_object
 
     def _get_placeholder_image(self):
         """Return a placeholder image for missing files"""
