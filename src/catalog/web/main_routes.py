@@ -553,41 +553,78 @@ def recover_pending():
 
             # Get preview with better error handling
             preview = None
-            try:
-                preview = preview_service.get_preview(doc.filename)
-            except Exception as e:
-                current_app.logger.error(
-                    f"Preview generation failed for {doc.filename}: {str(e)}"
+            try:  # This try was missing its except/finally, and filename was not defined
+                preview_data_from_service = preview_service.get_preview(
+                    doc.filename
+                )  # Use doc.filename
+
+                # Detailed logging for debugging the signal
+                current_app.logger.info(
+                    f"Preview data from service for '{doc.filename}': '{preview_data_from_service}' (type: {type(preview_data_from_service)})"
+                )
+                # Explicitly compare with the known signal string
+                expected_signal = "fallback_to_direct_url"
+                is_fallback_signal = preview_data_from_service == expected_signal
+                current_app.logger.info(
+                    f"Is it the fallback signal ('{expected_signal}')? {is_fallback_signal}"
                 )
 
-            # Check file presence in storage
-            file_exists = False
-            try:
-                storage.client.stat_object(storage.bucket, doc.filename)
-                file_exists = True
-            except Exception:
-                current_app.logger.warning(f"File {doc.filename} not found in storage")
+                if is_fallback_signal:
+                    current_app.logger.info(
+                        f"Fallback signal detected for '{doc.filename}'. Getting presigned URL."
+                    )
+                    direct_url = storage.get_presigned_url(doc.filename)
+                    if direct_url:
+                        current_app.logger.info(
+                            f"Successfully got presigned URL for '{doc.filename}': {direct_url}"
+                        )
+                        # This part seems to be from a different route /api/preview/, not recover_pending view
+                        # For recover_pending, we just need the preview content for the template
+                        preview = {
+                            "status": "fallback_redirect",
+                            "url": direct_url,
+                            "filename": doc.filename,
+                        }
+                    else:  # Failed to get presigned URL
+                        current_app.logger.error(
+                            f"Could not get presigned URL for '{doc.filename}' after fallback signal."
+                        )
+                        preview = {
+                            "status": "error",
+                            "message": "Preview generation signaled fallback, but failed to get direct URL.",
+                        }
+                else:
+                    # Not the fallback signal, so preview_data_from_service is actual preview content
+                    current_app.logger.info(
+                        f"Not the fallback signal for '{doc.filename}'. Treating as preview content. Preview data starts with: '{str(preview_data_from_service)[:100]}...'"
+                    )
+                    preview = {
+                        "status": "success",
+                        "preview": preview_data_from_service,
+                    }
+            except Exception as preview_exc:
+                current_app.logger.error(
+                    f"Preview generation failed for {doc.filename} in recover_pending: {str(preview_exc)}"
+                )
+                preview = None  # Ensure preview is None if an error occurs
 
             documents_data.append(
                 {
                     "id": doc.id,
                     "filename": doc.filename,
                     "upload_date": doc.upload_date.strftime("%Y-%m-%d %H:%M:%S"),
-                    "file_size": f"{(doc.file_size/1024):.2f} KB",
-                    "preview": preview,
+                    "file_size": (
+                        f"{(doc.file_size/1024):.2f} KB" if doc.file_size else "N/A"
+                    ),
                     "status": doc.status,
-                    "hours_pending": round(hours_pending, 1),
-                    "file_exists": file_exists,
+                    "hours_pending": f"{hours_pending:.2f}",
+                    "preview": preview,  # Use the fetched preview data
                 }
             )
 
-        # Log if no documents found
-        if not documents_data:
-            current_app.logger.info("No stuck documents found to recover")
-
         return render_template("pages/recover_pending.html", documents=documents_data)
 
-    except Exception as e:
+    except Exception as e:  # This is the except for the main try block of the function
         current_app.logger.error(f"Error in recover pending: {str(e)}", exc_info=True)
         flash(f"Error loading recover pending dashboard: {str(e)}", "error")
         return render_template("pages/recover_pending.html", documents=[])
@@ -838,14 +875,27 @@ def api_documents():
 def get_document_preview(filename):
     """API endpoint for fetching document previews"""
     try:
-        preview_data = preview_service.get_preview(filename)
+        preview_data_from_service = preview_service.get_preview(filename)
 
-        if preview_data == "fallback_to_direct_url":
-            # If PDF conversion failed, get a presigned URL from storage
-            direct_url = storage.get_presigned_url(filename)  # Use the new method
+        # Detailed logging for debugging the signal
+        current_app.logger.info(
+            f"Preview data from service for '{filename}': '{preview_data_from_service}' (type: {type(preview_data_from_service)})"
+        )
+        # Explicitly compare with the known signal string
+        expected_signal = "fallback_to_direct_url"
+        is_fallback_signal = preview_data_from_service == expected_signal
+        current_app.logger.info(
+            f"Is it the fallback signal ('{expected_signal}')? {is_fallback_signal}"
+        )
+
+        if is_fallback_signal:
+            current_app.logger.info(
+                f"Fallback signal detected for '{filename}'. Getting presigned URL."
+            )
+            direct_url = storage.get_presigned_url(filename)
             if direct_url:
                 current_app.logger.info(
-                    f"PDF preview failed for {filename}, falling back to direct URL: {direct_url}"
+                    f"Successfully got presigned URL for '{filename}': {direct_url}"
                 )
                 return jsonify(
                     {
@@ -856,20 +906,23 @@ def get_document_preview(filename):
                 )
             else:
                 current_app.logger.error(
-                    f"Could not get direct URL for {filename} after fallback signal."
+                    f"Could not get presigned URL for '{filename}' after fallback signal."
                 )
                 return (
                     jsonify(
                         {
                             "status": "error",
-                            "message": "Preview failed and direct URL not found",
+                            "message": "Preview generation signaled fallback, but failed to get direct URL.",
                         }
                     ),
-                    404,
+                    500,  # Internal error, not 404 for the preview API itself
                 )
         else:
-            # Otherwise, return the generated preview (image or placeholder)
-            return jsonify({"status": "success", "preview": preview_data})
+            # Not the fallback signal, so preview_data_from_service is actual preview content (image data URI or placeholder URI)
+            current_app.logger.info(
+                f"Not the fallback signal for '{filename}'. Treating as preview content. Preview data starts with: '{str(preview_data_from_service)[:100]}...'"
+            )
+            return jsonify({"status": "success", "preview": preview_data_from_service})
 
     except Exception as e:
         current_app.logger.error(

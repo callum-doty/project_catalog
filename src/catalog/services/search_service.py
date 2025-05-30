@@ -981,7 +981,8 @@ class SearchService:
 
             if missing_previews:
                 try:
-                    from tasks.preview_tasks import generate_preview
+                    # Corrected import path
+                    from src.catalog.tasks.preview_tasks import generate_preview
 
                     for filename in missing_previews:
                         generate_preview.delay(filename)
