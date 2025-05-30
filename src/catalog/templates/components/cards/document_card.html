@@ -70,20 +70,17 @@
   </div>
 
   <!-- Preview Section -->
-  <div class="w-full h-48 bg-gray-100 flex items-center justify-center">
-    {% if doc.preview %}
-    <img
-      src="{{ doc.preview }}"
-      alt="Preview of {{ doc.filename }}"
-      class="w-full h-full object-contain preview-image"
-      loading="lazy"
-      decoding="async"
-      onerror="this.onerror=null; this.src='/static/img/placeholder.png';"
-    />
-    {% else %}
+  <div
+    class="w-full h-48 bg-gray-100 flex items-center justify-center preview-container"
+    data-filename="{{ doc.filename }}"
+    data-loaded="false"
+  >
+    <!-- Loading spinner or initial placeholder can be styled here if needed, 
+         but preview-loader.js will replace this content. 
+         For simplicity, keep it empty or with a very basic placeholder. -->
     <div class="flex flex-col items-center text-gray-400">
       <svg
-        class="w-12 h-12 mb-2"
+        class="w-12 h-12 mb-2 animate-pulse"
         fill="none"
         stroke="currentColor"
         viewBox="0 0 24 24"
@@ -95,9 +92,8 @@
           d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
         />
       </svg>
-      <span>No preview available</span>
+      <span class="text-sm">Loading preview...</span>
     </div>
-    {% endif %}
   </div>
 
   <div class="p-6">
