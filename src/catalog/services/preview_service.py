@@ -116,10 +116,10 @@ class PreviewService:
             elif file_data:
                 self.logger.info(f"File_data for {filename} is too short: {file_data}")
             else:
-                self.logger.warning(f"File_data for {filename} is None or empty.")
-                return self._generate_placeholder_preview(
-                    f"Empty file data: {os.path.basename(filename)}"
+                self.logger.warning(
+                    f"File_data for {filename} is None or empty. Triggering fallback."
                 )
+                return "fallback_to_direct_url"  # Fallback for empty file data
 
             # Create a temporary file for the PDF - This is actually not needed if using convert_from_bytes
             # with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
@@ -161,10 +161,10 @@ class PreviewService:
                     return "fallback_to_direct_url"
 
                 if not images:
-                    self.logger.error(f"No images extracted from PDF for {filename}")
-                    return self._generate_placeholder_preview(
-                        f"Empty PDF: {os.path.basename(filename)}"
+                    self.logger.error(
+                        f"No images extracted from PDF for {filename}. Triggering fallback."
                     )
+                    return "fallback_to_direct_url"  # Fallback if no images extracted
 
                 image = images[0]
 
@@ -184,9 +184,10 @@ class PreviewService:
                     f"Error processing extracted image for PDF {filename}: {str(e_process)}",
                     exc_info=True,
                 )
-                return self._generate_placeholder_preview(
-                    f"Error processing PDF image: {os.path.basename(filename)}"
+                self.logger.warning(
+                    f"Error processing PDF image for {filename}. Triggering fallback."
                 )
+                return "fallback_to_direct_url"  # Fallback for image processing error
             # Removed the finally block as temp_path is no longer used with convert_from_bytes
 
         except Exception as e_outer:  # Catch-all for the outer try block
@@ -194,9 +195,10 @@ class PreviewService:
                 f"Outer PDF preview generation error for {filename}: {str(e_outer)}",
                 exc_info=True,
             )
-            return self._generate_placeholder_preview(
-                f"Error: {os.path.basename(filename)}"
+            self.logger.warning(
+                f"Outer PDF preview error for {filename}. Triggering fallback."
             )
+            return "fallback_to_direct_url"  # Fallback for any other outer error
 
     def _generate_placeholder_preview(self, message="No preview available"):
         """Generate a placeholder image when preview generation fails"""
