@@ -181,6 +181,8 @@ services:
       #   sync: false
       - key: APP_SETTINGS
         value: "src.config.ProductionConfig"
+      - key: FLASK_ENV
+        value: production
   - type: cron
     name: project-catalog-cron
     env: python
