@@ -88,7 +88,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 src="${data.preview}" 
                 alt="Preview of ${filename}" 
                 class="w-full h-full object-contain fade-in"
-                onerror="this.onerror=null; this.src='/static/img/placeholder.png';"
+                onerror="this.onerror=null; this.src='/api/placeholder-image';"
               >
             `;
           } else {
@@ -144,7 +144,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.preview-image').forEach(img => {
       img.onerror = function() {
         this.onerror = null;
-        this.src = '/static/img/placeholder.png';
+        this.src = '/api/placeholder-image'; // Updated to API endpoint
       };
     });
   });

@@ -59,6 +59,8 @@ from src.catalog.utils.query_builders import (
     get_stuck_documents_query,
 )
 from src.catalog.constants import CACHE_TIMEOUTS
+from flask import send_file  # Added for sending image file
+import io  # Added for BytesIO
 
 
 main_routes = Blueprint("main_routes", __name__)
@@ -1021,6 +1023,43 @@ def get_quality_metrics():
             f"Error getting quality metrics: {str(e)}", exc_info=True
         )
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@main_routes.route("/api/placeholder-image")
+def get_placeholder_image_route():
+    """API endpoint to serve the placeholder image."""
+    try:
+        # The 'storage' instance is MinIOStorage, which has _get_placeholder_image
+        image_data = storage._get_placeholder_image()
+        if image_data:
+            return send_file(
+                io.BytesIO(image_data),
+                mimetype="image/png",
+                as_attachment=False,
+                download_name="placeholder.png",
+            )
+        else:
+            # This case should ideally not happen if _get_placeholder_image always returns something
+            current_app.logger.error("Placeholder image data was empty.")
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "Failed to generate placeholder image",
+                    }
+                ),
+                500,
+            )
+    except Exception as e:
+        current_app.logger.error(
+            f"Error serving placeholder image: {str(e)}", exc_info=True
+        )
+        return (
+            jsonify(
+                {"status": "error", "message": "Server error generating placeholder"}
+            ),
+            500,
+        )
 
 
 @main_routes.route("/api/generate-scorecards", methods=["POST"])
