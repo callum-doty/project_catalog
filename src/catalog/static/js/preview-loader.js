@@ -99,6 +99,9 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .catch(error => {
           console.error('Initial error loading preview:', error);
+          // Log the filename being used for the fallback
+          console.log('[Fallback] Filename value:', filename);
+          console.log('[Fallback] Encoded filename value:', encodeURIComponent(filename));
           // Attempt to load direct URL as a fallback
           fetch(`/search/fallback_to_direct_url?filename=${encodeURIComponent(filename)}`)
             .then(fallbackResponse => {
