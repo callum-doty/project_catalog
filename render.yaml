@@ -69,7 +69,7 @@ services:
     name: project-catalog-web # Current naming
     env: python # Assuming Python runtime, not Docker as in the old working example
     region: oregon
-    plan: free # Adjust as needed
+    plan: starter # Adjust as needed
     # repo, branch, buildCommand, startCommand would be needed if not Docker
     # If using Docker runtime for this service, define dockerfilePath etc.
     # For now, assuming Python runtime as per our recent attempts:
