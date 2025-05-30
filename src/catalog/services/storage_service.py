@@ -325,6 +325,7 @@ class MinIOStorage:
                 secret_key=self.secret_key,
                 secure=public_secure,
                 http_client=self.shared_http_pool,
+                region=os.getenv("MINIO_REGION", "us-east-1"),  # Explicitly set region
             )
 
             self.logger.info(
