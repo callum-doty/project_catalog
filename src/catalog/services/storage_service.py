@@ -18,9 +18,12 @@ class MinIOStorage:
         return cls._instance
 
     def _init_client(self):
-        if self._client is None:
+        if self._client is None:  # Ensure this runs only once for the main client
             self.logger = logging.getLogger(__name__)
-            http_client = PoolManager(timeout=10.0, retries=3)
+            # Store http_client, access_key, secret_key on self for reuse
+            self.shared_http_pool = PoolManager(timeout=10.0, retries=3)
+            self.access_key = os.getenv("MINIO_ACCESS_KEY", "minioaccess")
+            self.secret_key = os.getenv("MINIO_SECRET_KEY", "miniosecret")
 
             # Determine endpoint with production-specific override if MINIO_ENDPOINT is missing
             minio_internal_host_env = os.getenv("MINIO_INTERNAL_HOST")
@@ -82,8 +85,7 @@ class MinIOStorage:
                 else:
                     endpoint_to_use = raw_local_endpoint
 
-            access_key = os.getenv("MINIO_ACCESS_KEY", "minioaccess")
-            secret_key = os.getenv("MINIO_SECRET_KEY", "miniosecret")
+            # self.access_key and self.secret_key are already set above
 
             # Using print for guaranteed output, and logger
             print(f"DEBUG_PRINT: FLASK_ENV from env: '{flask_env}'")
@@ -114,10 +116,10 @@ class MinIOStorage:
 
             self._client = Minio(
                 endpoint=endpoint_to_use,
-                access_key=access_key,
-                secret_key=secret_key,
+                access_key=self.access_key,  # Use stored access key
+                secret_key=self.secret_key,  # Use stored secret key
                 secure=minio_secure,  # Dynamically set based on parsed scheme
-                http_client=http_client,
+                http_client=self.shared_http_pool,  # Use stored http_client
             )
             # Use S3_BUCKET_NAME to match render.yaml; fallback for local dev
             self.bucket = os.getenv(
@@ -279,29 +281,66 @@ class MinIOStorage:
             return []
 
     def get_presigned_url(self, filename, expires_seconds=3600):
-        """Get a presigned URL for a file in MinIO"""
+        """Get a presigned URL for a file in MinIO, ensuring it uses the public endpoint."""
         try:
-            # Ensure client is initialized (though singleton should handle this)
-            if not self._client:
-                self.logger.warning(
-                    "MinIO client not initialized in get_presigned_url, attempting re-init."
-                )
-                self._init_client()
-
-            if not self._client:  # Still not initialized
+            public_endpoint_str = os.getenv("MINIO_ENDPOINT")
+            if not public_endpoint_str:
                 self.logger.error(
-                    "MinIO client failed to initialize for get_presigned_url."
+                    "MINIO_ENDPOINT environment variable is not set. Cannot generate public presigned URL."
                 )
                 return None
 
-            url = self._client.presigned_get_object(
+            # Parse the public endpoint string
+            public_host = public_endpoint_str
+            public_secure = False  # Default to False
+            if public_endpoint_str.startswith("https://"):
+                public_host = public_endpoint_str.replace("https://", "")
+                public_secure = True
+            elif public_endpoint_str.startswith("http://"):
+                public_host = public_endpoint_str.replace("http://", "")
+                public_secure = False
+
+            # Ensure essential attributes like self.access_key are initialized
+            # This check is important if get_presigned_url could somehow be called before _init_client completes
+            # for the singleton, though unlikely with current structure.
+            if (
+                not hasattr(self, "access_key")
+                or not hasattr(self, "secret_key")
+                or not hasattr(self, "shared_http_pool")
+            ):
+                self.logger.warning(
+                    "Main client attributes not fully initialized. Attempting _init_client for MinioStorage instance."
+                )
+                self._init_client()  # Should ideally not re-run if _client already exists, but good for safety.
+                if not hasattr(self, "access_key"):  # Still not there after re-attempt
+                    self.logger.error(
+                        "Failed to initialize MinioStorage attributes needed for presigned URL."
+                    )
+                    return None
+
+            # Create a temporary client configured with the public endpoint
+            temp_public_client = Minio(
+                endpoint=public_host,
+                access_key=self.access_key,
+                secret_key=self.secret_key,
+                secure=public_secure,
+                http_client=self.shared_http_pool,
+            )
+
+            self.logger.info(
+                f"Generating presigned URL for {filename} using public endpoint: {public_host}, secure: {public_secure}"
+            )
+
+            url = temp_public_client.presigned_get_object(
                 self.bucket, filename, expires=timedelta(seconds=expires_seconds)
             )
-            self.logger.info(f"Successfully generated presigned URL for {filename}")
+            self.logger.info(
+                f"Successfully generated public presigned URL for {filename}: {url}"
+            )
             return url
         except Exception as e:
             self.logger.error(
-                f"Error generating presigned URL for {filename}: {str(e)}",
+                f"Error generating public presigned URL for {filename}: {str(e)}",
                 exc_info=True,
             )
             return None
