@@ -100,10 +100,7 @@ services:
           type: web
           property: host
       - key: MINIO_PUBLIC_ENDPOINT # Publicly accessible URL for MinIO
-        fromService:
-          name: minio-storage
-          type: web
-          property: url # This provides the full public URL like https://minio-storage-xxxx.onrender.com
+        value: "https://minio-storage.onrender.com" # Assumed public URL for the minio-storage service
       # MINIO_INTERNAL_PORT removed as MinIO will now consistently use 9000 internally
       - key: MINIO_ENDPOINT # Fallback, Python code will prioritize MINIO_INTERNAL_HOST
         value: "http://minio-storage:9000" # MinIO S3 API on fixed port 9000
