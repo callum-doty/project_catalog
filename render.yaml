@@ -22,7 +22,7 @@ services:
     runtime: image
     image:
       url: docker.io/minio/minio:RELEASE.2023-05-04T21-44-30Z
-    dockerCommand: minio server /data --address 0.0.0.0:9000 --console-address 0.0.0.0:9001 # MinIO S3 API on fixed port 9000
+    dockerCommand: sh -c 'minio server /data --address 0.0.0.0:$PORT --console-address 0.0.0.0:9001' # Use Render's $PORT for S3 API
     healthCheckPath: /minio/health/live
     region: oregon
     plan: standard # MinIO might need a paid plan for disk and resources
@@ -94,16 +94,18 @@ services:
           type: redis
           name: project-catalog-redis # Match name of Redis service
           property: connectionString
-      - key: MINIO_INTERNAL_HOST
+      - key: MINIO_INTERNAL_S3_HOST # For internal S3 API connection
         fromService:
-          name: minio-storage # Match name of MinIO service
+          name: minio-storage
           type: web
           property: host
-      - key: MINIO_PUBLIC_ENDPOINT # Publicly accessible URL for MinIO
+      - key: MINIO_INTERNAL_S3_PORT # For internal S3 API connection
+        fromService:
+          name: minio-storage
+          type: web
+          property: port # This gets the $PORT Render assigned to minio-storage's S3 API
+      - key: MINIO_PUBLIC_ENDPOINT # Publicly accessible URL for MinIO (for presigned URLs)
         value: "https://minio-storage.onrender.com" # Assumed public URL for the minio-storage service
-      # MINIO_INTERNAL_PORT removed as MinIO will now consistently use 9000 internally
-      - key: MINIO_ENDPOINT # Fallback, Python code will prioritize MINIO_INTERNAL_HOST
-        value: "http://minio-storage:9000" # MinIO S3 API on fixed port 9000
       - key: MINIO_ACCESS_KEY
         fromService:
           name: minio-storage
@@ -149,14 +151,16 @@ services:
           type: redis
           name: project-catalog-redis
           property: connectionString
-      - key: MINIO_INTERNAL_HOST
+      - key: MINIO_INTERNAL_S3_HOST # For internal S3 API connection
         fromService:
           name: minio-storage
           type: web
           property: host
-      # MINIO_INTERNAL_PORT removed as MinIO will now consistently use 9000 internally
-      - key: MINIO_ENDPOINT # Fallback
-        value: "http://minio-storage:9000" # MinIO S3 API on fixed port 9000
+      - key: MINIO_INTERNAL_S3_PORT # For internal S3 API connection
+        fromService:
+          name: minio-storage
+          type: web
+          property: port # This gets the $PORT Render assigned to minio-storage's S3 API
       - key: MINIO_ACCESS_KEY
         fromService:
           name: minio-storage
