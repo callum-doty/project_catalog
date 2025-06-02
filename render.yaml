@@ -22,7 +22,7 @@ services:
     runtime: image
     image:
       url: docker.io/minio/minio:RELEASE.2023-05-04T21-44-30Z
-    dockerCommand: sh -c '/usr/bin/minio server /data --address 0.0.0.0:$PORT --console-address 0.0.0.0:9001' # Use Render's $PORT for S3 API
+    dockerCommand: server /data --address 0.0.0.0:$PORT --console-address 0.0.0.0:9001 # Args to image's ENTRYPOINT, use Render's $PORT
     healthCheckPath: /minio/health/live
     region: oregon
     plan: standard # MinIO might need a paid plan for disk and resources
@@ -210,13 +210,16 @@ services:
           type: redis
           name: project-catalog-redis
           property: connectionString
-      - key: MINIO_INTERNAL_HOST
+      - key: MINIO_INTERNAL_S3_HOST # For internal S3 API connection
         fromService:
           name: minio-storage
           type: web
           property: host
-      - key: MINIO_ENDPOINT # Fallback
-        value: "http://minio-storage:9000"
+      - key: MINIO_INTERNAL_S3_PORT # For internal S3 API connection
+        fromService:
+          name: minio-storage
+          type: web
+          property: port # This gets the $PORT Render assigned to minio-storage's S3 API
       - key: MINIO_ACCESS_KEY
         fromService:
           name: minio-storage
