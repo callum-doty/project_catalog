@@ -275,11 +275,11 @@ class PreviewService:
                 return self._generate_image_preview(file_data, filename)
 
             elif ext in self.supported_pdfs:
-                # For PDFs, always signal to use direct URL fallback, bypassing pdf2image entirely.
+                # Attempt to generate an image preview for the PDF
                 self.logger.info(
-                    f"File {filename} is a PDF, skipping server-side image conversion and signaling for direct URL fallback."
+                    f"File {filename} is a PDF, attempting server-side image conversion."
                 )
-                return "fallback_to_direct_url"
+                return self._generate_pdf_preview(file_data, filename)
 
             else:
                 return self._generate_placeholder_preview(
