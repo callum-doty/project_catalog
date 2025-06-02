@@ -875,62 +875,129 @@ def api_documents():
 
 @main_routes.route("/api/preview/<path:filename>")
 def get_document_preview(filename):
-    """API endpoint for fetching document previews"""
+    """API endpoint for fetching document previews based on database status."""
     try:
-        preview_data_from_service = preview_service.get_preview(filename)
+        # Attempt to find the document by filename
+        document = Document.query.filter_by(filename=filename).first()
 
-        # Detailed logging for debugging the signal
-        current_app.logger.info(
-            f"Preview data from service for '{filename}': '{preview_data_from_service}' (type: {type(preview_data_from_service)})"
-        )
-        # Explicitly compare with the known signal string
-        expected_signal = "fallback_to_direct_url"
-        is_fallback_signal = preview_data_from_service == expected_signal
-        current_app.logger.info(
-            f"Is it the fallback signal ('{expected_signal}')? {is_fallback_signal}"
-        )
-
-        if is_fallback_signal:
+        if document:
             current_app.logger.info(
-                f"Fallback signal detected for '{filename}'. Getting presigned URL."
+                f"Document ID {document.id} found for filename {filename}. Preview status: {document.preview_status}, S3 Key: {document.s3_preview_key}"
             )
-            direct_url = storage.get_presigned_url(filename)
-            if direct_url:
+            if document.preview_status == "SUCCESS" and document.s3_preview_key:
+                preview_bucket_name = current_app.config.get(
+                    "S3_PREVIEW_BUCKET", storage.bucket
+                )  # Fallback to main bucket if not set
+                try:
+                    # Generate presigned URL for the actual preview file
+                    preview_url = storage.get_presigned_url(
+                        object_name=document.s3_preview_key,
+                        bucket_name=preview_bucket_name,
+                    )
+                    if preview_url:
+                        current_app.logger.info(
+                            f"Successfully generated presigned URL for preview key '{document.s3_preview_key}' in bucket '{preview_bucket_name}' for document {document.id}"
+                        )
+                        return jsonify(
+                            {
+                                "status": "success",
+                                "url": preview_url,
+                                "filename": filename,
+                                "preview_type": "s3_generated",
+                            }
+                        )
+                    else:
+                        current_app.logger.error(
+                            f"Failed to generate presigned URL for preview key '{document.s3_preview_key}' for document {document.id}. Falling back."
+                        )
+                        # Fall through to fallback logic if URL generation fails for some reason
+                except Exception as presign_err:
+                    current_app.logger.error(
+                        f"Error generating presigned URL for preview key '{document.s3_preview_key}': {presign_err}",
+                        exc_info=True,
+                    )
+                    # Fall through to fallback logic
+
+            elif document.preview_status == "PENDING":
                 current_app.logger.info(
-                    f"Successfully got presigned URL for '{filename}': {direct_url}"
+                    f"Preview for document {document.id} ({filename}) is PENDING."
+                )
+                return (
+                    jsonify(
+                        {
+                            "status": "pending",
+                            "message": "Preview generation is currently in progress.",
+                            "filename": filename,
+                        }
+                    ),
+                    202,
+                )  # Accepted
+
+            # If status is FAILED, or SUCCESS but no key, or any other status, or document fields not yet populated
+            current_app.logger.info(
+                f"Preview for document {document.id} ({filename}) not available or failed. Status: {document.preview_status}. Proceeding to fallback."
+            )
+
+        else:
+            current_app.logger.info(
+                f"Document with filename '{filename}' not found in database. Proceeding to fallback for original document."
+            )
+
+        # Fallback logic: try to serve the original document or a placeholder
+        # This part can reuse some of the original logic if PreviewService.get_preview() handles placeholders
+        # For simplicity, let's directly try to get a presigned URL for the original document.
+        current_app.logger.info(
+            f"Attempting fallback: generating presigned URL for original document '{filename}' in bucket '{storage.bucket}'."
+        )
+        try:
+            original_doc_url = storage.get_presigned_url(
+                object_name=filename, bucket_name=storage.bucket
+            )  # Assuming default bucket for originals
+            if original_doc_url:
+                current_app.logger.info(
+                    f"Fallback: Successfully generated presigned URL for original document '{filename}': {original_doc_url}"
                 )
                 return jsonify(
                     {
                         "status": "fallback_redirect",
-                        "url": direct_url,
+                        "url": original_doc_url,
                         "filename": filename,
                     }
                 )
             else:
                 current_app.logger.error(
-                    f"Could not get presigned URL for '{filename}' after fallback signal."
+                    f"Fallback: Failed to generate presigned URL for original document '{filename}'."
                 )
+                # If even the original can't be served, return a more definitive error.
                 return (
                     jsonify(
                         {
                             "status": "error",
-                            "message": "Preview generation signaled fallback, but failed to get direct URL.",
+                            "message": "Preview not available and original document URL could not be generated.",
                         }
                     ),
-                    500,  # Internal error, not 404 for the preview API itself
+                    404,
                 )
-        else:
-            # Not the fallback signal, so preview_data_from_service is actual preview content (image data URI or placeholder URI)
-            current_app.logger.info(
-                f"Not the fallback signal for '{filename}'. Treating as preview content. Preview data starts with: '{str(preview_data_from_service)[:100]}...'"
+        except Exception as fallback_presign_err:
+            current_app.logger.error(
+                f"Fallback: Error generating presigned URL for original document '{filename}': {fallback_presign_err}",
+                exc_info=True,
             )
-            return jsonify({"status": "success", "preview": preview_data_from_service})
+            return (
+                jsonify(
+                    {"status": "error", "message": "Error during fallback attempt."}
+                ),
+                500,
+            )
 
     except Exception as e:
         current_app.logger.error(
-            f"Preview API error for {filename}: {str(e)}", exc_info=True
+            f"General Preview API error for {filename}: {str(e)}", exc_info=True
         )
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return (
+            jsonify({"status": "error", "message": "An unexpected error occurred."}),
+            500,
+        )
 
 
 @main_routes.route("/api/sync-status")
