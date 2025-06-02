@@ -891,7 +891,7 @@ def get_document_preview(filename):
                 try:
                     # Generate presigned URL for the actual preview file
                     preview_url = storage.get_presigned_url(
-                        object_name=document.s3_preview_key,
+                        document.s3_preview_key,  # Positional argument for object_name
                         bucket_name=preview_bucket_name,
                     )
                     if preview_url:
@@ -951,7 +951,8 @@ def get_document_preview(filename):
         )
         try:
             original_doc_url = storage.get_presigned_url(
-                object_name=filename, bucket_name=storage.bucket
+                filename,
+                bucket_name=storage.bucket,  # Positional argument for object_name
             )  # Assuming default bucket for originals
             if original_doc_url:
                 current_app.logger.info(

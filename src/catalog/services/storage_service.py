@@ -280,9 +280,10 @@ class MinIOStorage:
             self.logger.error(f"Error listing MinIO files: {str(e)}")
             return []
 
-    def get_presigned_url(self, filename, expires_seconds=3600):
-        """Get a presigned URL for a file in MinIO, ensuring it uses the public endpoint."""
+    def get_presigned_url(self, object_name, bucket_name=None, expires_seconds=3600):
+        """Get a presigned URL for an object in MinIO, ensuring it uses the public endpoint."""
         try:
+            target_bucket = bucket_name or self.bucket
             # Prioritize MINIO_PUBLIC_ENDPOINT, then fall back to MINIO_ENDPOINT
             public_endpoint_str = os.getenv("MINIO_PUBLIC_ENDPOINT")
             if not public_endpoint_str:
@@ -314,8 +315,6 @@ class MinIOStorage:
             # Minio client handles it correctly. No need to strip it here.
 
             # Ensure essential attributes like self.access_key are initialized
-            # This check is important if get_presigned_url could somehow be called before _init_client completes
-            # for the singleton, though unlikely with current structure.
             if (
                 not hasattr(self, "access_key")
                 or not hasattr(self, "secret_key")
@@ -324,8 +323,8 @@ class MinIOStorage:
                 self.logger.warning(
                     "Main client attributes not fully initialized. Attempting _init_client for MinioStorage instance."
                 )
-                self._init_client()  # Should ideally not re-run if _client already exists, but good for safety.
-                if not hasattr(self, "access_key"):  # Still not there after re-attempt
+                self._init_client()
+                if not hasattr(self, "access_key"):
                     self.logger.error(
                         "Failed to initialize MinioStorage attributes needed for presigned URL."
                     )
@@ -338,23 +337,23 @@ class MinIOStorage:
                 secret_key=self.secret_key,
                 secure=public_secure,
                 http_client=self.shared_http_pool,
-                region=os.getenv("MINIO_REGION", "us-east-2"),  # Default to Ohio region
+                region=os.getenv("MINIO_REGION", "us-east-2"),
             )
 
             self.logger.info(
-                f"Generating presigned URL for {filename} using public endpoint: {public_host}, secure: {public_secure}"
+                f"Generating presigned URL for object '{object_name}' in bucket '{target_bucket}' using public endpoint: {public_host}, secure: {public_secure}"
             )
 
             url = temp_public_client.presigned_get_object(
-                self.bucket, filename, expires=timedelta(seconds=expires_seconds)
+                target_bucket, object_name, expires=timedelta(seconds=expires_seconds)
             )
             self.logger.info(
-                f"Successfully generated public presigned URL for {filename}: {url}"
+                f"Successfully generated public presigned URL for '{object_name}' in bucket '{target_bucket}': {url}"
             )
             return url
         except Exception as e:
             self.logger.error(
-                f"Error generating public presigned URL for {filename}: {str(e)}",
+                f"Error generating public presigned URL for '{object_name}' in bucket '{target_bucket}': {str(e)}",
                 exc_info=True,
             )
             return None
