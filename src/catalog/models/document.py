@@ -29,6 +29,21 @@ class Document(db.Model):
     search_vector = db.Column(TSVECTOR)
     embeddings = db.Column(Vector(1536), nullable=True)
 
+    # Fields for preview tracking
+    preview_status = db.Column(db.Text, nullable=True)  # e.g., PENDING, SUCCESS, FAILED
+    s3_preview_key = db.Column(
+        db.Text, nullable=True
+    )  # Key/path to the preview file in S3/Minio
+    preview_task_id = db.Column(
+        db.Text, nullable=True
+    )  # Celery task ID for preview generation
+    preview_error_message = db.Column(
+        db.Text, nullable=True
+    )  # Error message if preview generation failed
+    preview_generated_at = db.Column(
+        db.DateTime(timezone=True), nullable=True
+    )  # Timestamp of successful preview generation
+
     scorecard = db.relationship(
         "DocumentScorecard",
         backref="document_parent",
