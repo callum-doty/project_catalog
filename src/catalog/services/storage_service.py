@@ -283,22 +283,35 @@ class MinIOStorage:
     def get_presigned_url(self, filename, expires_seconds=3600):
         """Get a presigned URL for a file in MinIO, ensuring it uses the public endpoint."""
         try:
-            public_endpoint_str = os.getenv("MINIO_ENDPOINT")
+            # Prioritize MINIO_PUBLIC_ENDPOINT, then fall back to MINIO_ENDPOINT
+            public_endpoint_str = os.getenv("MINIO_PUBLIC_ENDPOINT")
+            if not public_endpoint_str:
+                self.logger.info(
+                    "MINIO_PUBLIC_ENDPOINT not set, falling back to MINIO_ENDPOINT for presigned URL."
+                )
+                public_endpoint_str = os.getenv("MINIO_ENDPOINT")
+
             if not public_endpoint_str:
                 self.logger.error(
-                    "MINIO_ENDPOINT environment variable is not set. Cannot generate public presigned URL."
+                    "Neither MINIO_PUBLIC_ENDPOINT nor MINIO_ENDPOINT environment variable is set. Cannot generate public presigned URL."
                 )
                 return None
 
             # Parse the public endpoint string
             public_host = public_endpoint_str
             public_secure = False  # Default to False
+            # Render's `property: url` for a service includes the scheme (https://)
             if public_endpoint_str.startswith("https://"):
                 public_host = public_endpoint_str.replace("https://", "")
                 public_secure = True
-            elif public_endpoint_str.startswith("http://"):
+            elif public_endpoint_str.startswith(
+                "http://"
+            ):  # Handle http just in case, though Render usually provides https
                 public_host = public_endpoint_str.replace("http://", "")
                 public_secure = False
+
+            # If the public_host still contains a port (e.g., from a local MINIO_ENDPOINT like localhost:9000),
+            # Minio client handles it correctly. No need to strip it here.
 
             # Ensure essential attributes like self.access_key are initialized
             # This check is important if get_presigned_url could somehow be called before _init_client completes
