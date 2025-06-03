@@ -325,10 +325,15 @@ def process_document(self, filename, minio_path, document_id):
                     try:
                         from src.catalog.tasks.preview_tasks import generate_preview
 
-                        generate_preview.delay(filename, document_id)
-                        logger.info(f"Queued preview generation for {filename}")
+                        # Corrected argument order: document_id first, then filename
+                        generate_preview.delay(document_id, filename)
+                        logger.info(
+                            f"Queued preview generation for document ID {document_id} ({filename})"
+                        )
                     except Exception as e:
-                        logger.error(f"Failed to queue preview: {str(e)}")
+                        logger.error(
+                            f"Failed to queue preview for document ID {document_id} ({filename}): {str(e)}"
+                        )
 
                     # Queue embeddings generation
                     try:
