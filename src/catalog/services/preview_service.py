@@ -192,8 +192,14 @@ class PreviewService:
                     ) as temp_preview_file:
                         temp_preview_file.write(preview_image_bytes)
                         temp_preview_filepath = temp_preview_file.name
+                    self.logger.info(
+                        f"PDF preview temporary file created at: {temp_preview_filepath} for {filename}"
+                    )
 
                     # upload_file expects filepath and the object name (key in bucket)
+                    self.logger.info(
+                        f"Attempting to upload PDF preview {temp_preview_filepath} to S3 as {s3_object_name} for {filename}"
+                    )
                     self.storage.upload_file(temp_preview_filepath, s3_object_name)
                     self.logger.info(
                         f"Successfully generated and uploaded PDF preview for {filename} to S3 object: {s3_object_name}"
