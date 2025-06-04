@@ -1,0 +1,8 @@
+[
+    {
+        "AllowedOrigins": ["https://minio-storage-hmqe.onrender.com/"],
+        "AllowedMethods": ["GET", "HEAD"],
+        "AllowedHeaders": ["*"],
+        "MaxAgeSeconds": 3000
+    }
+]
