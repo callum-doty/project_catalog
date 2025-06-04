@@ -7,11 +7,7 @@ from celery import Celery
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-celery_app = Celery("src.catalog.tasks")
-celery_app.config_from_object("django.conf:settings", namespace="CELERY")
-celery_app.autodiscover_tasks(["src.catalog.tasks"])
-
-# Get queue names from constants
+# Get queue names from constants (moved before Celery app initialization)
 try:
     from src.catalog.constants import QUEUE_NAMES, DOCUMENT_STATUSES
 except ImportError:
@@ -46,8 +42,21 @@ result_backend = (
 safe_broker = broker_url.replace("redis://", "redis://****:****@")
 logger.info(f"Initializing Celery with broker: {safe_broker}")
 
-# Initialize Celery
+# Initialize Celery ONCE
 celery_app = Celery("src.catalog.tasks", broker=broker_url)
+
+# Autodiscover tasks from specified modules.
+# Ensure all modules containing tasks are listed here or tasks are imported directly.
+celery_app.autodiscover_tasks(
+    [
+        "src.catalog.tasks",
+        "src.catalog.tasks.document_tasks",
+        "src.catalog.tasks.preview_tasks",
+        "src.catalog.tasks.embedding_tasks",
+        "src.catalog.tasks.dropbox_tasks",  # if it exists and has tasks
+        "src.catalog.tasks.recovery_tasks",  # if it exists and has tasks
+    ]
+)  # Add other task modules if necessary
 
 # Configure Celery
 celery_app.conf.update(
