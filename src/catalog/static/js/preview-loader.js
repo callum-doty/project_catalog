@@ -81,11 +81,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
               </object>
             `;
-          } else if (data.preview) {
+          } else if (data.status === 'success' && data.url) { // Check for status 'success' and data.url
             // Show the image preview with fade-in effect
             container.innerHTML = `
               <img 
-                src="${data.preview}" 
+                src="${data.url}"  // Use data.url for the image source
                 alt="Preview of ${filename}" 
                 class="w-full h-full object-contain fade-in"
                 onerror="this.onerror=null; this.src='/api/placeholder-image';"
