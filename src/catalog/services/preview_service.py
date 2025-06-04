@@ -173,28 +173,42 @@ class PreviewService:
                 image.save(buffered, format="JPEG", quality=85, optimize=True)
                 preview_image_bytes = buffered.getvalue()
 
-                # Define S3 key for the preview
-                base, ext = os.path.splitext(filename)
-                # Sanitize base filename for S3 key
-                s3_filename_base = secure_filename(base)
-                s3_preview_key = f"previews/{s3_filename_base}.jpg"
+                preview_image_bytes = buffered.getvalue()
 
-                # Upload to S3
+                # Define S3 object name for the preview
+                base, ext = os.path.splitext(filename)
+                s3_object_name_base = secure_filename(
+                    base
+                )  # Original filename base, sanitized
+                s3_object_name = f"previews/{s3_object_name_base}.jpg"  # This is the key within the bucket
+
+                # Save bytes to a temporary file to use with storage.upload_file
+                temp_preview_filepath = (
+                    None  # Initialize to ensure it's defined for finally
+                )
                 try:
-                    self.storage.save_file(
-                        s3_preview_key, preview_image_bytes, content_type="image/jpeg"
-                    )
+                    with tempfile.NamedTemporaryFile(
+                        delete=False, suffix=".jpg"
+                    ) as temp_preview_file:
+                        temp_preview_file.write(preview_image_bytes)
+                        temp_preview_filepath = temp_preview_file.name
+
+                    # upload_file expects filepath and the object name (key in bucket)
+                    self.storage.upload_file(temp_preview_filepath, s3_object_name)
                     self.logger.info(
-                        f"Successfully generated and uploaded PDF preview for {filename} to S3 key: {s3_preview_key}"
+                        f"Successfully generated and uploaded PDF preview for {filename} to S3 object: {s3_object_name}"
                     )
-                    return {"s3_key": s3_preview_key}
+                    # The Celery task expects just the S3 key (object name)
+                    return {"s3_key": s3_object_name}
                 except Exception as e_s3_upload:
                     self.logger.error(
                         f"Failed to upload PDF preview for {filename} to S3: {str(e_s3_upload)}",
                         exc_info=True,
                     )
-                    # If S3 upload fails, we can't return an s3_key
-                    return "fallback_to_direct_url"  # Or handle more gracefully
+                    return "fallback_to_direct_url"
+                finally:
+                    if temp_preview_filepath and os.path.exists(temp_preview_filepath):
+                        os.remove(temp_preview_filepath)
 
             except (
                 Exception
