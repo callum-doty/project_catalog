@@ -22,6 +22,27 @@ def upgrade():
     # Create pgvector extension
     op.execute("CREATE EXTENSION IF NOT EXISTS vector;")
 
+    # Drop tables in reverse order of creation, if they exist, using raw SQL with CASCADE
+    op.execute("DROP TABLE IF EXISTS document_scorecards CASCADE;")
+    op.execute("DROP TABLE IF EXISTS search_feedback CASCADE;")
+    op.execute("DROP TABLE IF EXISTS dropbox_syncs CASCADE;")
+    op.execute("DROP TABLE IF EXISTS clients CASCADE;")
+    op.execute("DROP TABLE IF EXISTS llm_keywords CASCADE;")
+    op.execute(
+        "DROP TABLE IF EXISTS llm_analysis CASCADE;"
+    )  # CASCADE should handle its indexes
+    op.execute("DROP TABLE IF EXISTS keyword_synonyms CASCADE;")
+    op.execute("DROP TABLE IF EXISTS extracted_text CASCADE;")
+    op.execute("DROP TABLE IF EXISTS entities CASCADE;")
+    op.execute("DROP TABLE IF EXISTS design_elements CASCADE;")
+    op.execute("DROP TABLE IF EXISTS communication_focus CASCADE;")
+    op.execute("DROP TABLE IF EXISTS classifications CASCADE;")
+    op.execute(
+        "DROP TABLE IF EXISTS documents CASCADE;"
+    )  # CASCADE should handle its indexes
+    op.execute("DROP TABLE IF EXISTS keyword_taxonomy CASCADE;")
+    op.execute("DROP TABLE IF EXISTS batch_jobs CASCADE;")
+
     # Create batch_jobs table
     op.create_table(
         "batch_jobs",
