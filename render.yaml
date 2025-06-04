@@ -195,19 +195,18 @@ services:
         value: production
   - type: cron
     name: project-catalog-cron
-    env: python
+    runtime: docker # Changed from env: python
+    dockerfilePath: ./Dockerfile.beat # Added Dockerfile path
     region: oregon
-    plan: starter # Changed 'free' to 'starter'
-    buildCommand: |
-      pip install --upgrade pip
-      pip install -r requirements.txt
+    plan: starter
     schedule: "0 * * * *"
-    startCommand: "/opt/render/project/src/.venv/bin/python -m celery -A src.catalog.tasks.celery_app beat --loglevel=INFO"
+    # buildCommand is removed (handled by Dockerfile)
+    # startCommand is removed (handled by Dockerfile CMD)
     envVars:
+      # SERVICE_TYPE might still be useful if your app code uses it, otherwise can be removed for beat
       - key: SERVICE_TYPE
         value: "beat"
-      - key: PYTHON_VERSION
-        value: "3.9.18" # Specified full Python version
+      # PYTHON_VERSION is removed (handled by Dockerfile)
       - key: DATABASE_URL
         fromDatabase:
           name: project-catalog-postgres
