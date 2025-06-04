@@ -136,7 +136,9 @@ class SearchService:
                 )
 
                 # Queue missing previews for generation
-                self._queue_missing_previews([doc.filename for doc in documents])
+                self._queue_missing_previews(
+                    [{"id": doc.id, "filename": doc.filename} for doc in documents]
+                )
 
             # Calculate pagination info
             pagination = self._create_pagination_info(page, per_page, total_count)
@@ -841,7 +843,7 @@ class SearchService:
                 # Get preview if possible
                 preview = None
                 try:
-                    preview = self.preview_service.get_preview(doc.filename)
+                    preview = self.preview_service.get_preview(doc.id, doc.filename)
                 except Exception as e:
                     self.logger.error(
                         f"Preview generation failed for {doc.filename}: {str(e)}"
@@ -965,31 +967,49 @@ class SearchService:
             self.logger.error(f"Error getting hierarchical keywords: {str(e)}")
             return {doc_id: [] for doc_id in document_ids}
 
-    def _queue_missing_previews(self, filenames):
+    def _queue_missing_previews(self, documents_info: List[Dict[str, Any]]):
         """
-        Queue preview generation for files that don't have cached previews
+        Queue preview generation for files that don't have cached previews.
 
         Args:
-            filenames: List of filenames to check
+            documents_info: List of dictionaries, each containing 'id' and 'filename'.
         """
         try:
-            missing_previews = []
-            for filename in filenames:
-                cache_key = f"preview:{filename}"
-                if not cache.get(cache_key):
-                    missing_previews.append(filename)
+            missing_previews_tasks = []
+            for doc_info in documents_info:
+                document_id = doc_info.get("id")
+                filename = doc_info.get("filename")
 
-            if missing_previews:
+                if not document_id or not filename:
+                    self.logger.warning(
+                        f"Skipping preview queue for invalid doc_info: {doc_info}"
+                    )
+                    continue
+
+                # Use a more specific cache key including document_id
+                cache_key = f"preview:doc_{document_id}:{filename}"
+                if not cache.get(cache_key):
+                    missing_previews_tasks.append((document_id, filename))
+
+            if missing_previews_tasks:
                 try:
-                    # Corrected import path
                     from src.catalog.tasks.preview_tasks import generate_preview
 
-                    for filename in missing_previews:
-                        generate_preview.delay(filename)
+                    for doc_id, fname in missing_previews_tasks:
+                        # Ensure both document_id and filename are passed to the task
+                        generate_preview.delay(doc_id, fname)
+                        self.logger.info(
+                            f"Queued preview generation for doc ID {doc_id}, filename {fname}"
+                        )
                 except Exception as e:
-                    self.logger.error(f"Error queueing preview generation: {str(e)}")
+                    self.logger.error(
+                        f"Error queueing preview generation tasks: {str(e)}",
+                        exc_info=True,
+                    )
         except Exception as e:
-            self.logger.error(f"Error checking for missing previews: {str(e)}")
+            self.logger.error(
+                f"Error checking for missing previews: {str(e)}", exc_info=True
+            )
 
     def _create_pagination_info(self, page, per_page, total_count):
         """
