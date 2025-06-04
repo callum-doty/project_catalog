@@ -249,3 +249,69 @@ services:
         value: "production"
       - key: APP_SETTINGS
         value: "src.config.ProductionConfig"
+
+  - type: cron
+    name: dropbox-sync-cron
+    env: python # Using Python runtime
+    region: oregon
+    plan: starter # Aligning with other services, adjust if needed
+    schedule: "0 * * * *" # Runs at the start of every hour
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: "celery -A src.catalog.tasks.celery_app call tasks.sync_dropbox"
+    envVars:
+      - key: DROPBOX_FOLDER_PATH
+        value: "/test" # Specific Dropbox folder to sync
+      - key: DROPBOX_ACCESS_TOKEN
+        sync: false # IMPORTANT: Set this secret in Render UI for this service
+      # Common environment variables, similar to other services
+      - key: DATABASE_URL
+        fromDatabase:
+          name: project-catalog-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: project-catalog-redis
+          property: connectionString
+      - key: MINIO_INTERNAL_S3_HOST
+        fromService:
+          name: minio-storage
+          type: web
+          property: host
+      - key: MINIO_INTERNAL_S3_PORT
+        fromService:
+          name: minio-storage
+          type: web
+          property: port
+      - key: MINIO_REGION
+        value: "oregon"
+      - key: MINIO_ACCESS_KEY
+        fromService:
+          name: minio-storage
+          type: web
+          envVarKey: MINIO_ROOT_USER
+      - key: MINIO_SECRET_KEY
+        fromService:
+          name: minio-storage
+          type: web
+          envVarKey: MINIO_ROOT_PASSWORD
+      - key: S3_BUCKET_NAME
+        value: "documents" # Target bucket in MinIO
+      - key: SECRET_KEY # Sync with web service for consistency
+        fromService:
+          type: web
+          name: project-catalog-web
+          envVarKey: SECRET_KEY
+      - key: FLASK_ENV
+        value: "production"
+      - key: APP_SETTINGS
+        value: "src.config.ProductionConfig"
+      # Optional: Override default rate limiting settings for the sync task if needed
+      # - key: DOCUMENT_PROCESSING_DELAY
+      #   value: "60" # e.g., 60 seconds delay between batches
+      # - key: DROPBOX_BATCH_SIZE
+      #   value: "10" # e.g., process 10 files per batch
+      # - key: MAX_CONCURRENT_PROCESSING
+      #   value: "5"  # e.g., max 5 concurrent operations (if applicable to task logic)
