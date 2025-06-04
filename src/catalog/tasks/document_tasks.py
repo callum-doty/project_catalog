@@ -799,3 +799,85 @@ def recover_pending_documents():
                 logger.error(f"Error recovering document {doc.id}: {str(e)}")
 
         return f"Processed {len(stuck_documents)} stuck documents"
+
+
+@celery_app.task(name="tasks.process_batch_uploads")
+def process_batch_uploads():
+    """
+    Periodically checks for documents with 'BATCH_PENDING' status
+    and queues them for individual processing.
+    """
+    from src.catalog import create_app
+
+    app = create_app()
+    with app.app_context():
+        logger.info("Running process_batch_uploads task...")
+        batch_pending_docs = Document.query.filter_by(status="BATCH_PENDING").all()
+
+        if not batch_pending_docs:
+            logger.info("No documents found in BATCH_PENDING state.")
+            return "No BATCH_PENDING documents found."
+
+        logger.info(
+            f"Found {len(batch_pending_docs)} documents in BATCH_PENDING state."
+        )
+        storage = MinIOStorage()  # Initialize storage service
+
+        queued_count = 0
+        for doc in batch_pending_docs:
+            try:
+                logger.info(
+                    f"Processing document ID: {doc.id}, Filename: {doc.filename} from BATCH_PENDING."
+                )
+
+                # Construct minio_path (assuming it's not stored directly on the model)
+                # This needs to align with how `process_document` expects it.
+                # Typically, it's bucket_name/filename.
+                minio_path = f"{storage.bucket}/{doc.filename}"
+
+                # Check if file actually exists in MinIO before queueing
+                # This is a good practice to avoid queueing tasks for non-existent files
+                try:
+                    storage.client.stat_object(storage.bucket, doc.filename)
+                    file_exists_in_minio = True
+                except Exception as minio_exc:
+                    logger.error(
+                        f"File {doc.filename} (ID: {doc.id}) not found in MinIO. Error: {minio_exc}. Marking as FAILED."
+                    )
+                    file_exists_in_minio = False
+                    doc.status = DOCUMENT_STATUSES["FAILED"]
+                    db.session.commit()
+                    continue  # Skip to the next document
+
+                if file_exists_in_minio:
+                    # Update status to PENDING before queueing to avoid re-picking by this task
+                    doc.status = DOCUMENT_STATUSES["PENDING"]
+                    db.session.commit()
+                    logger.info(f"Updated document ID: {doc.id} status to PENDING.")
+
+                    # Queue the main processing task
+                    process_document.delay(doc.filename, minio_path, doc.id)
+                    logger.info(
+                        f"Queued document ID: {doc.id} ({doc.filename}) for processing."
+                    )
+                    queued_count += 1
+
+            except Exception as e:
+                logger.error(
+                    f"Error processing document ID: {doc.id} from BATCH_PENDING state: {str(e)}",
+                    exc_info=True,
+                )
+                # Optionally, set status to FAILED here if a general error occurs during this stage
+                try:
+                    doc.status = DOCUMENT_STATUSES[
+                        "FAILED"
+                    ]  # Mark as FAILED if any error during batch handling
+                    db.session.commit()
+                except Exception as db_err:
+                    logger.error(
+                        f"Failed to update status to FAILED for doc ID {doc.id} after error: {db_err}",
+                        exc_info=True,
+                    )
+                    db.session.rollback()  # Rollback this specific doc's status update attempt
+
+        return f"Processed {len(batch_pending_docs)} BATCH_PENDING documents. Queued {queued_count} for processing."

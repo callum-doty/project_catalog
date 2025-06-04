@@ -252,118 +252,99 @@ def home():
 
 @main_routes.route("/upload", methods=["POST"])
 def upload_file():
-    if "file" not in request.files:
-        flash("No file part", "error")
+    files = request.files.getlist("file")  # Get list of files
+
+    if not files or all(f.filename == "" for f in files):
+        flash("No files selected or all files are empty.", "error")
         return redirect(url_for("main_routes.search_documents"))
 
-    file = request.files["file"]
-    if file.filename == "":
-        flash("No selected file", "error")
-        return redirect(url_for("main_routes.search_documents"))
+    uploaded_count = 0
+    failed_uploads = []
 
-    document = None  # Initialize document to None
-    temp_path = None  # Initialize temp_path
+    for file_storage in files:
+        if file_storage and file_storage.filename != "":
+            document = None  # Initialize document to None
+            temp_path = None  # Initialize temp_path
+            filename = secure_filename(file_storage.filename)
 
-    try:
-        filename = secure_filename(file.filename)
-        temp_path = os.path.join("/tmp", filename)
-        file.save(temp_path)
-
-        # Ensure file was saved before proceeding
-        if not os.path.exists(temp_path):
-            raise IOError(f"Failed to save temporary file: {temp_path}")
-
-        file_size = os.path.getsize(temp_path)
-
-        # Create document record FIRST
-        document = Document(
-            filename=filename,
-            upload_date=datetime.utcnow(),
-            file_size=file_size,
-            status="PENDING",  # Start as PENDING
-            page_count=0,
-        )
-        db.session.add(document)
-        db.session.commit()
-
-        # Now we have a document.id to use
-        minio_path = storage.upload_file(temp_path, filename)
-        current_app.logger.info(
-            f"Successfully uploaded {filename} to MinIO at {minio_path}"
-        )
-
-        # Queue ONLY the main document processing task
-        try:
-            current_app.logger.info(
-                f"Queuing document {document.id} ({filename}) via process_document task"
-            )
-
-            from src.catalog.tasks.celery_app import celery_app
-
-            # Pass all necessary arguments: filename, minio_path, document.id
-            task = celery_app.send_task(
-                "process_document", args=[filename, minio_path, document.id]
-            )
-
-            current_app.logger.info(
-                f"Main processing task queued with ID: {task.id} for document ID {document.id}"
-            )
-
-        except Exception as e:
-            current_app.logger.error(
-                f"Failed to queue process_document task for document {document.id if document else 'N/A'}: {str(e)}",
-                exc_info=True,
-            )
-
-            if document:
-                document.status = "FAILED"
-                db.session.commit()
-            flash("Error starting document processing.", "error")
-
-            if temp_path and os.path.exists(temp_path):
-                os.remove(temp_path)
-            return redirect(url_for("main_routes.search_documents"))
-
-        # Remove temp file *after* successful queuing
-        if temp_path and os.path.exists(temp_path):
-            os.remove(temp_path)
-
-        flash("File uploaded successfully. Processing initiated.", "success")
-        return redirect(url_for("main_routes.search_documents"))
-
-    except Exception as e:
-        current_app.logger.error(
-            f"Upload error for file '{file.filename if file else 'N/A'}': {str(e)}",
-            exc_info=True,
-        )
-        # Rollback DB changes if document creation started but failed
-        db.session.rollback()
-        # Update status to FAILED if document object exists
-        if document and document.id:
             try:
-                # Re-fetch the document within a new session scope if needed, or just update status
-                doc_to_fail = Document.query.get(document.id)
-                if doc_to_fail:
-                    doc_to_fail.status = "FAILED"
-                    db.session.commit()
-            except Exception as db_err:
+                temp_path = os.path.join("/tmp", filename)
+                file_storage.save(temp_path)
+
+                if not os.path.exists(temp_path):
+                    raise IOError(f"Failed to save temporary file: {temp_path}")
+
+                file_size = os.path.getsize(temp_path)
+
+                document = Document(
+                    filename=filename,
+                    upload_date=datetime.utcnow(),
+                    file_size=file_size,
+                    status="BATCH_PENDING",  # New status for batch processing
+                    page_count=0,
+                )
+                db.session.add(document)
+                db.session.commit()  # Commit to get document.id
+
+                # Upload to MinIO
+                minio_path = storage.upload_file(
+                    temp_path, filename
+                )  # Use document.id in path if preferred
+                current_app.logger.info(
+                    f"Successfully uploaded {filename} (ID: {document.id}) to MinIO at {minio_path}. Status: BATCH_PENDING."
+                )
+
+                # Update document with minio_path if your model stores it, or if it's derived
+                # For now, we assume minio_path is not directly stored on Document model but used by tasks
+
+                uploaded_count += 1
+
+            except Exception as e:
                 current_app.logger.error(
-                    f"Failed to mark document as FAILED after upload error: {db_err}",
+                    f"Upload error for file '{filename}': {str(e)}",
                     exc_info=True,
                 )
                 db.session.rollback()
+                if document and document.id:  # If document was created before error
+                    try:
+                        doc_to_fail = Document.query.get(document.id)
+                        if doc_to_fail:
+                            doc_to_fail.status = "FAILED"
+                            db.session.commit()
+                    except Exception as db_err:
+                        current_app.logger.error(
+                            f"Failed to mark document {filename} as FAILED after upload error: {db_err}",
+                            exc_info=True,
+                        )
+                        db.session.rollback()
 
-        flash(f"Error uploading file: {str(e)}", "error")
-        # Clean up temp file if it exists
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except OSError as os_err:
-                current_app.logger.error(
-                    f"Error removing temp file during cleanup: {os_err}", exc_info=True
-                )
+                failed_uploads.append(filename)
 
-        return redirect(url_for("search_routes.search_documents"))
+            finally:
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except OSError as os_err:
+                        current_app.logger.error(
+                            f"Error removing temp file '{temp_path}' during cleanup: {os_err}",
+                            exc_info=True,
+                        )
+        else:
+            # This case handles if an empty file part was somehow included in the list
+            current_app.logger.info("Skipped an empty file part in batch upload.")
+
+    if uploaded_count > 0:
+        flash(
+            f"{uploaded_count} file(s) uploaded successfully and are pending batch processing.",
+            "success",
+        )
+    if failed_uploads:
+        flash(
+            f"Failed to upload {len(failed_uploads)} file(s): {', '.join(failed_uploads)}.",
+            "error",
+        )
+
+    return redirect(url_for("main_routes.search_documents"))
 
 
 @main_routes.route("/search")
