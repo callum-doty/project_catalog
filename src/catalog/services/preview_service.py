@@ -171,12 +171,31 @@ class PreviewService:
                 # Save as JPEG for smaller size
                 buffered = io.BytesIO()
                 image.save(buffered, format="JPEG", quality=85, optimize=True)
-                img_str = base64.b64encode(buffered.getvalue()).decode()
+                preview_image_bytes = buffered.getvalue()
 
-                self.logger.info(
-                    f"Successfully generated PDF preview for {filename}, size: {len(img_str)} chars"
-                )
-                return f"data:image/jpeg;base64,{img_str}"
+                # Define S3 key for the preview
+                base, ext = os.path.splitext(filename)
+                # Sanitize base filename for S3 key
+                s3_filename_base = secure_filename(base)
+                s3_preview_key = f"previews/{s3_filename_base}.jpg"
+
+                # Upload to S3
+                try:
+                    self.storage.save_file(
+                        s3_preview_key, preview_image_bytes, content_type="image/jpeg"
+                    )
+                    self.logger.info(
+                        f"Successfully generated and uploaded PDF preview for {filename} to S3 key: {s3_preview_key}"
+                    )
+                    return {"s3_key": s3_preview_key}
+                except Exception as e_s3_upload:
+                    self.logger.error(
+                        f"Failed to upload PDF preview for {filename} to S3: {str(e_s3_upload)}",
+                        exc_info=True,
+                    )
+                    # If S3 upload fails, we can't return an s3_key
+                    return "fallback_to_direct_url"  # Or handle more gracefully
+
             except (
                 Exception
             ) as e_process:  # More specific exception for image processing part
