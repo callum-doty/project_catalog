@@ -202,7 +202,7 @@ services:
       pip install --upgrade pip
       pip install -r requirements.txt
     schedule: "0 * * * *"
-    startCommand: "python -m celery -A src.catalog.tasks.celery_app beat --loglevel=INFO"
+    startCommand: "/opt/render/project/src/.venv/bin/python -m celery -A src.catalog.tasks.celery_app beat --loglevel=INFO"
     envVars:
       - key: SERVICE_TYPE
         value: "beat"
