@@ -105,7 +105,7 @@ services:
           type: web
           property: port # This gets the $PORT Render assigned to minio-storage's S3 API
       - key: MINIO_PUBLIC_ENDPOINT # Publicly accessible URL for MinIO (for presigned URLs)
-        value: "https://minio-storage.onrender.com" # Assumed public URL for the minio-storage service
+        value: "https://minio-storage-hmqe.onrender.com" # Corrected public URL for the minio-storage service
       - key: MINIO_REGION
         value: "oregon" # Match MinIO server region (Oregon)
       - key: MINIO_ACCESS_KEY
