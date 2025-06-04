@@ -193,6 +193,11 @@ services:
         value: "src.config.ProductionConfig"
       - key: FLASK_ENV
         value: production
+      # Add Dropbox environment variables required by the sync_dropbox task
+      - key: DROPBOX_FOLDER_PATH
+        value: "/test" # Specific Dropbox folder to sync
+      - key: DROPBOX_ACCESS_TOKEN
+        sync: false # IMPORTANT: Set this secret in Render UI for this worker service as well
   - type: cron
     name: project-catalog-cron
     runtime: docker # Changed from env: python
