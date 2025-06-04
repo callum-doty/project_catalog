@@ -36,26 +36,50 @@ class PreviewService:
                 return cached_preview
 
             # If not in cache, check if a preview generation is already in progress
-            in_progress_key = f"preview_in_progress:{filename}"
+            in_progress_key = f"preview_in_progress:doc_{document_id}:{filename}"  # Made key more specific
             if cache.get(in_progress_key):
                 self.logger.info(
-                    f"Preview generation for {filename} already in progress, returning placeholder"
+                    f"Preview generation for doc_id {document_id}, filename {filename} already in progress, returning placeholder"
                 )
                 return self._generate_placeholder_preview("Preview being generated...")
 
             # Mark as in progress (1 minute timeout to prevent deadlocks)
             cache.set(in_progress_key, True, timeout=60)
+            self.logger.info(f"Set {in_progress_key} in cache for doc_id {document_id}")
 
             # Queue background task for preview generation
             from src.catalog.tasks.preview_tasks import generate_preview
 
-            generate_preview.delay(document_id, filename)  # Pass document_id
+            generate_preview.delay(document_id, filename)
+            self.logger.info(
+                f"Queued Celery task generate_preview for doc_id {document_id}, filename {filename}"
+            )
 
-            # Generate preview synchronously for immediate display just this once
-            return self._generate_preview_internal(filename)
+            # Attempt to generate preview synchronously for immediate display if possible,
+            # but ensure _generate_preview_internal can handle document_id if needed.
+            # For now, assuming _generate_preview_internal primarily uses filename for data fetching.
+            # If _generate_preview_internal strictly needs document_id for fetching, its signature and calls must change.
+            # The current signature is _generate_preview_internal(self, filename)
+            # Let's assume filename is unique enough for storage.get_file(filename) for now.
+            # If not, _generate_preview_internal needs to be refactored.
+            # The Celery task also calls _generate_preview_internal(filename)
+
+            # For now, let's call it as is, but be aware this might be a point of failure if filename isn't globally unique for fetching.
+            # If this synchronous call fails and returns a placeholder, the UI will show that.
+            # The async task will then (hopefully) generate the real one.
+            synchronous_preview = self._generate_preview_internal(
+                filename
+            )  # filename is passed
+            self.logger.info(
+                f"Synchronous _generate_preview_internal for doc_id {document_id} returned: {type(synchronous_preview)}"
+            )
+            return synchronous_preview
 
         except Exception as e:
-            self.logger.error(f"Preview error for {filename}: {str(e)}", exc_info=True)
+            self.logger.error(
+                f"Preview error for doc_id {document_id}, filename {filename}: {str(e)}",
+                exc_info=True,
+            )
             return self._generate_placeholder_preview("Error generating preview")
 
     def _generate_image_preview(self, file_data, filename):

@@ -882,39 +882,107 @@ def get_document_preview(document_id, filename):
     """API endpoint for fetching document previews."""
     try:
         current_app.logger.info(
-            f"Request for preview: doc_id={document_id}, filename={filename}"
+            f"API request for preview: doc_id={document_id}, filename={filename}"
         )
-        # Use the preview_service.get_preview method which now handles caching and task queuing
+        document = db.session.get(Document, document_id)
+
+        if not document or document.filename != filename:
+            current_app.logger.warning(
+                f"Document not found or filename mismatch for doc_id={document_id}, req_filename={filename}"
+            )
+            # Return a placeholder if document not found by ID or filename doesn't match
+            placeholder_url = preview_service._generate_placeholder_preview(
+                "Document not found"
+            )
+            return (
+                jsonify(
+                    {
+                        "status": "success",
+                        "url": placeholder_url,
+                        "filename": filename,
+                        "preview_type": "placeholder_error",
+                    }
+                ),
+                404,
+            )  # Or 200 if we always want to provide a visual
+
+        # Check 1: Document has a successfully generated S3 preview key
+        if document.preview_status == "SUCCESS" and document.s3_preview_key:
+            current_app.logger.info(
+                f"Doc ID {document_id}: Found SUCCESS status with s3_preview_key: {document.s3_preview_key}"
+            )
+            preview_bucket_name = current_app.config.get(
+                "S3_PREVIEW_BUCKET", storage.bucket
+            )
+            try:
+                preview_url = storage.get_presigned_url(
+                    document.s3_preview_key, bucket_name=preview_bucket_name
+                )
+                if preview_url:
+                    return jsonify(
+                        {
+                            "status": "success",
+                            "url": preview_url,
+                            "filename": filename,
+                            "preview_type": "s3_generated",
+                        }
+                    )
+                else:
+                    current_app.logger.error(
+                        f"Doc ID {document_id}: Failed to get presigned URL for {document.s3_preview_key}"
+                    )
+                    # Fall through to call preview_service.get_preview for a fresh attempt or placeholder
+            except Exception as e_presign:
+                current_app.logger.error(
+                    f"Doc ID {document_id}: Error generating presigned URL for {document.s3_preview_key}: {e_presign}",
+                    exc_info=True,
+                )
+                # Fall through
+
+        # Check 2: Document preview generation is PENDING
+        # This state is primarily managed by PreviewService's cache, but we can reflect it if DB says PENDING
+        if document.preview_status == "PENDING":
+            current_app.logger.info(
+                f"Doc ID {document_id}: DB status is PENDING. Calling PreviewService.get_preview."
+            )
+            # This call will likely hit the "in_progress" cache key in PreviewService
+            # and return "Preview being generated..." placeholder
+            preview_data = preview_service.get_preview(document_id, filename)
+            # Ensure preview_data (which is likely a data URI for placeholder) is returned correctly
+            if isinstance(preview_data, str) and preview_data.startswith("data:image"):
+                return jsonify(
+                    {
+                        "status": "success",
+                        "url": preview_data,
+                        "filename": filename,
+                        "preview_type": "placeholder_pending_db",
+                    }
+                )
+            # If PreviewService returns something else (e.g. it managed to generate synchronously)
+            # The existing logic below for handling preview_data will take over.
+
+        # Check 3: Document preview FAILED or status is not SUCCESS/PENDING, or no s3_key yet
+        # Call preview_service.get_preview() to attempt generation or get a placeholder.
+        # This will queue a Celery task if not already in progress and attempt sync generation.
+        current_app.logger.info(
+            f"Doc ID {document_id}: Status is '{document.preview_status}' or no s3_key. Calling PreviewService.get_preview."
+        )
         preview_data = preview_service.get_preview(document_id, filename)
 
-        # The preview_service.get_preview method returns different types of data:
-        # 1. A base64 encoded image string (e.g., "data:image/jpeg;base64,...")
-        # 2. A dictionary like {'s3_key': 'previews/file.jpg'} if it was just generated and uploaded by a task
-        # 3. A string "fallback_to_direct_url" if PDF conversion failed or other issues.
-        # 4. A placeholder if all else fails.
-
         if isinstance(preview_data, str) and preview_data.startswith("data:image"):
-            # This is a direct base64 image (e.g., placeholder or cached small image)
-            # The frontend expects a URL, so this case needs careful handling.
-            # For simplicity, if it's a direct data URI, we can pass it as is,
-            # but the frontend JS expects a URL to put in an <img> src.
-            # A better approach for direct data might be to return it differently or
-            # ensure previews are always URLs (e.g., S3 URLs).
-            # For now, let's assume if it's a data URI, it's a placeholder or small image.
             current_app.logger.info(
-                f"Preview for doc_id {document_id} is a direct data URI."
+                f"Doc ID {document_id}: PreviewService returned a direct data URI."
             )
             return jsonify(
                 {
-                    "status": "success",  # Or a different status like "direct_data"
-                    "url": preview_data,  # Frontend will use this as src
+                    "status": "success",
+                    "url": preview_data,
                     "filename": filename,
-                    "preview_type": "data_uri",
+                    "preview_type": "data_uri_from_service",
                 }
             )
         elif isinstance(preview_data, dict) and "s3_key" in preview_data:
-            # Preview was likely just generated by a task, and s3_key is returned.
-            # We need to generate a presigned URL for this s3_key.
+            # This case might occur if _generate_preview_internal (called by get_preview) succeeded synchronously
             s3_key = preview_data["s3_key"]
             preview_bucket_name = current_app.config.get(
                 "S3_PREVIEW_BUCKET", storage.bucket
@@ -924,29 +992,27 @@ def get_document_preview(document_id, filename):
                     s3_key, bucket_name=preview_bucket_name
                 )
                 if preview_url:
-                    current_app.logger.info(
-                        f"Generated presigned URL for S3 key {s3_key} for doc_id {document_id}."
-                    )
                     return jsonify(
                         {
                             "status": "success",
                             "url": preview_url,
                             "filename": filename,
-                            "preview_type": "s3_generated_task",
+                            "preview_type": "s3_sync_generated",
                         }
                     )
                 else:
-                    raise Exception("Failed to generate presigned URL for S3 key.")
-            except Exception as e_presign:
+                    raise Exception(
+                        "Failed to generate presigned URL for synchronously generated S3 key."
+                    )
+            except Exception as e_presign_sync:
                 current_app.logger.error(
-                    f"Error generating presigned URL for s3_key {s3_key} for doc_id {document_id}: {e_presign}",
+                    f"Doc ID {document_id}: Error with sync generated s3_key {s3_key}: {e_presign_sync}",
                     exc_info=True,
                 )
-                # Fall through to general fallback
-
+                # Fall through to final placeholder
         elif preview_data == "fallback_to_direct_url":
             current_app.logger.info(
-                f"Preview generation for doc_id {document_id} signaled fallback_to_direct_url."
+                f"Doc ID {document_id}: PreviewService signaled fallback_to_direct_url."
             )
             try:
                 original_doc_url = storage.get_presigned_url(
@@ -962,29 +1028,28 @@ def get_document_preview(document_id, filename):
                     )
                 else:
                     raise Exception(
-                        "Failed to get presigned URL for original document."
+                        "Failed to get presigned URL for original document in fallback."
                     )
-            except Exception as e_fallback_url:
+            except Exception as e_fallback_url_service:
                 current_app.logger.error(
-                    f"Error getting direct URL for fallback for doc_id {document_id}: {e_fallback_url}",
+                    f"Doc ID {document_id}: Error in fallback_to_direct_url from service: {e_fallback_url_service}",
                     exc_info=True,
                 )
-                # Fall through to general error
+                # Fall through to final placeholder
 
-        # If preview_data is None, or some other unexpected format, or an error occurred above
+        # Final fallback: If none of the above yielded a result, serve a generic placeholder.
         current_app.logger.warning(
-            f"Preview for doc_id {document_id} ({filename}) was not available or in unexpected format: {type(preview_data)}. Attempting placeholder."
+            f"Doc ID {document_id}: All preview attempts exhausted or led to error. Serving final placeholder."
         )
-        # Attempt to serve a placeholder if other methods didn't yield a result
         placeholder_url = preview_service._generate_placeholder_preview(
             "Preview unavailable"
-        )  # This returns a data URI
+        )
         return jsonify(
             {
-                "status": "success",  # Technically success in providing *something*
+                "status": "success",
                 "url": placeholder_url,
                 "filename": filename,
-                "preview_type": "placeholder_generated",
+                "preview_type": "placeholder_final_fallback",
             }
         )
 
@@ -993,21 +1058,36 @@ def get_document_preview(document_id, filename):
             f"General Preview API error for doc_id {document_id}, filename {filename}: {str(e)}",
             exc_info=True,
         )
-        # Generic error response
-        placeholder_url = preview_service._generate_placeholder_preview(
-            "Error loading preview"
-        )
-        return (
-            jsonify(
-                {
-                    "status": "error",  # Or 'success' with placeholder_url if we always want to return an image
-                    "url": placeholder_url,  # Provide placeholder on error
-                    "message": "An error occurred while fetching the preview.",
-                    "filename": filename,
-                }
-            ),
-            500,
-        )
+        # Attempt to generate and return a placeholder even in case of general error
+        try:
+            placeholder_url = preview_service._generate_placeholder_preview(
+                "Error loading preview"
+            )
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "url": placeholder_url,
+                        "message": "An error occurred.",
+                        "filename": filename,
+                    }
+                ),
+                500,
+            )
+        except Exception as e_placeholder_fatal:
+            current_app.logger.critical(
+                f"FATAL: Could not even generate placeholder for doc_id {document_id}: {e_placeholder_fatal}",
+                exc_info=True,
+            )
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "Critical error generating preview response.",
+                    }
+                ),
+                500,
+            )
 
 
 @main_routes.route("/api/sync-status")
