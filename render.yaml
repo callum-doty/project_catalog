@@ -199,7 +199,7 @@ services:
     region: oregon
     plan: starter # Changed 'free' to 'starter'
     schedule: "0 * * * *"
-    startCommand: "python -m celery -A src.catalog.tasks.celery_app beat -s ./celerybeat-schedule --loglevel=INFO" # Changed to use python -m celery
+    startCommand: "python -m celery -A src.catalog.tasks.celery_app beat --loglevel=INFO" # Changed to use python -m celery
     envVars:
       - key: SERVICE_TYPE
         value: "beat"
