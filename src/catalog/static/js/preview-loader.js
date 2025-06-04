@@ -17,10 +17,13 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Load preview if needed
             if (previewContainer && previewContainer.dataset.loaded === 'false') {
+              const documentId = previewContainer.dataset.documentId;
               const filename = previewContainer.dataset.filename;
-              if (filename) {
-                loadDocumentPreview(previewContainer, filename);
+              if (documentId && filename) {
+                loadDocumentPreview(previewContainer, documentId, filename);
                 previewContainer.dataset.loaded = 'true';
+              } else {
+                console.warn('Missing documentId or filename for preview', previewContainer.dataset);
               }
             }
             
@@ -41,7 +44,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     // Function to load document preview
-    function loadDocumentPreview(container, filename) {
+    function loadDocumentPreview(container, documentId, filename) {
       // Store the original content for fallback
       const originalContent = container.innerHTML;
       
@@ -56,16 +59,16 @@ document.addEventListener('DOMContentLoaded', function() {
       `;
       
       // Fetch preview from API
-      fetch(`/api/preview/${encodeURIComponent(filename)}`)
+      fetch(`/api/preview/${documentId}/${encodeURIComponent(filename)}`)
         .then(response => {
           if (!response.ok) {
-            throw new Error(`Preview fetch failed: ${response.status}`);
+            throw new Error(`Preview fetch failed: ${response.status} for docId: ${documentId}, filename: ${filename}`);
           }
           return response.json();
         })
         .then(data => {
           if (data.status === 'fallback_redirect' && data.url) {
-            console.log(`Using PDF fallback for ${filename}: ${data.url}`);
+            console.log(`Using PDF fallback for docId: ${documentId}, filename: ${filename}: ${data.url}`);
             // Embed PDF using <object> tag or provide download link
             container.innerHTML = `
               <object data="${data.url}" type="application/pdf" class="w-full h-full">
@@ -93,17 +96,17 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
           } else {
             // No preview available, restore original or show a generic placeholder
-            console.warn(`No preview or fallback for ${filename}. Data:`, data);
+            console.warn(`No preview or fallback for docId: ${documentId}, filename: ${filename}. Data:`, data);
             container.innerHTML = originalContent; // Or a more specific placeholder
           }
         })
         .catch(error => {
           console.error('Initial error loading preview:', error);
           // Log the filename being used for the fallback
-          console.log('[Fallback] Filename value:', filename);
-          console.log('[Fallback] Encoded filename value:', encodeURIComponent(filename));
+          console.log(`[Fallback] Document ID: ${documentId}, Filename value: ${filename}`);
+          console.log(`[Fallback] Encoded filename value: ${encodeURIComponent(filename)}`);
           // Attempt to load direct URL as a fallback
-          fetch(`/search/fallback_to_direct_url?filename=${encodeURIComponent(filename)}`)
+          fetch(`/search/fallback_to_direct_url?document_id=${documentId}&filename=${encodeURIComponent(filename)}`)
             .then(fallbackResponse => {
               if (!fallbackResponse.ok) {
                 throw new Error(`Fallback fetch failed: ${fallbackResponse.status}`);
