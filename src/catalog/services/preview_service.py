@@ -19,12 +19,16 @@ class PreviewService:
         self.supported_pdfs = SUPPORTED_FILE_TYPES["DOCUMENTS"]
         self.logger = logging.getLogger(__name__)
 
-    @cache.memoize(timeout=CACHE_TIMEOUTS["PREVIEW"])
-    def get_preview(self, filename):
+    # @cache.memoize(timeout=CACHE_TIMEOUTS["PREVIEW"]) # Caching needs to consider document_id if it's part of the key
+    # For now, let's remove memoize here as the key would need document_id, or make filename globally unique.
+    # If filename is already globally unique and tied to a document, original caching might be fine.
+    # Let's assume filename is unique enough for now for the cache key, but pass document_id to task.
+    def get_preview(self, document_id, filename):  # Added document_id
         """Get preview for a file, first checking cache"""
         try:
             # Check cache first
-            cache_key = f"preview:{filename}"
+            # Cache key might need to include document_id if filenames are not globally unique
+            cache_key = f"preview:doc_{document_id}:{filename}"
             cached_preview = cache.get(cache_key)
 
             if cached_preview:
@@ -45,7 +49,7 @@ class PreviewService:
             # Queue background task for preview generation
             from src.catalog.tasks.preview_tasks import generate_preview
 
-            generate_preview.delay(filename)
+            generate_preview.delay(document_id, filename)  # Pass document_id
 
             # Generate preview synchronously for immediate display just this once
             return self._generate_preview_internal(filename)

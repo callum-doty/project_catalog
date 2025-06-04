@@ -214,7 +214,9 @@ def home():
             # Get preview if possible
             preview = None
             try:
-                preview = preview_service.get_preview(doc.filename)
+                preview = preview_service.get_preview(
+                    doc.id, doc.filename
+                )  # Pass doc.id
             except Exception as e:
                 current_app.logger.error(
                     f"Preview generation failed for {doc.filename}: {str(e)}"
@@ -507,7 +509,9 @@ def recovery_dashboard():
         for doc in failed_documents:
             preview = None
             try:
-                preview = preview_service.get_preview(doc.filename)
+                preview = preview_service.get_preview(
+                    doc.id, doc.filename
+                )  # Pass doc.id
             except Exception as e:
                 current_app.logger.error(
                     f"Preview generation failed for {doc.filename}: {str(e)}"
@@ -557,7 +561,7 @@ def recover_pending():
             preview = None
             try:  # This try was missing its except/finally, and filename was not defined
                 preview_data_from_service = preview_service.get_preview(
-                    doc.filename
+                    doc.id, doc.filename  # Pass doc.id
                 )  # Use doc.filename
 
                 # Detailed logging for debugging the signal
