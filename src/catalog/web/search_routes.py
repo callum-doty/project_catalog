@@ -24,7 +24,11 @@ storage_service = MinIOStorage()  # Added storage service instance
 
 @search_routes.route("/")
 @monitor_query
-@cache.cached(timeout=CACHE_TIMEOUTS["SEARCH"], query_string=True)
+@cache.cached(
+    timeout=CACHE_TIMEOUTS["SEARCH"],
+    query_string=True,
+    vary_on_headers=["X-Requested-With"],
+)
 def search_documents():
     """Search documents with multiple strategies and filters"""
     start_time = time.time()
