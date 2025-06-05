@@ -6,29 +6,31 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Initialize Intersection Observer for lazy loading previews
     const previewObserver = new IntersectionObserver(
-      (entries) => {
+      (entries, observerInstance) => { // observerInstance is the observer itself
         entries.forEach(entry => {
           if (entry.isIntersecting) {
             const card = entry.target;
-            
-            // Find preview container within this card
-            const previewImg = card.querySelector('.preview-image');
             const previewContainer = card.querySelector('.preview-container');
             
-            // Load preview if needed
-            if (previewContainer && previewContainer.dataset.loaded === 'false') {
+            // Check if not already loaded and not currently attempting to load
+            if (previewContainer && 
+                previewContainer.dataset.loaded !== 'true' && 
+                previewContainer.dataset.loading !== 'true') {
+                  
               const documentId = previewContainer.dataset.documentId;
               const filename = previewContainer.dataset.filename;
+
               if (documentId && filename) {
-                loadDocumentPreview(previewContainer, documentId, filename);
-                previewContainer.dataset.loaded = 'true';
+                // Pass card and observerInstance to handle unobserving on success
+                loadDocumentPreview(previewContainer, documentId, filename, card, observerInstance);
               } else {
-                console.warn('Missing documentId or filename for preview', previewContainer.dataset);
+                console.warn('Missing documentId or filename for preview. Unobserving to prevent loops.', previewContainer.dataset);
+                observerInstance.unobserve(card); // Unobserve if data is bad
               }
+            } else if (previewContainer && previewContainer.dataset.loaded === 'true') {
+              // If it's already successfully loaded, ensure it's unobserved
+              observerInstance.unobserve(card);
             }
-            
-            // Stop observing this card once its preview is loaded
-            previewObserver.unobserve(card);
           }
         });
       },
@@ -44,9 +46,10 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     // Function to load document preview
-    function loadDocumentPreview(container, documentId, filename) {
-      // Store the original content for fallback
-      const originalContent = container.innerHTML;
+    function loadDocumentPreview(container, documentId, filename, card, observerInstance) {
+      // Store the original content for fallback if all attempts fail
+      const originalContent = container.innerHTML; 
+      container.dataset.loading = 'true'; // Mark as attempting to load
       
       // Show loading indicator
       container.innerHTML = `
@@ -69,7 +72,6 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(data => {
           if (data.status === 'fallback_redirect' && data.url) {
             console.log(`Using PDF fallback for docId: ${documentId}, filename: ${filename}: ${data.url}`);
-            // Embed PDF using <object> tag or provide download link
             container.innerHTML = `
               <object data="${data.url}" type="application/pdf" class="w-full h-full">
                 <div class="flex flex-col items-center justify-center h-full p-4 text-center">
@@ -84,28 +86,30 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
               </object>
             `;
-          } else if (data.status === 'success' && data.url) { // Check for status 'success' and data.url
-            // Show the image preview with fade-in effect
+            container.dataset.loaded = 'true';
+            observerInstance.unobserve(card);
+          } else if (data.status === 'success' && data.url) {
             container.innerHTML = `
               <img 
-                src="${data.url}"  // Use data.url for the image source
+                src="${data.url}"
                 alt="Preview of ${filename}" 
                 class="w-full h-full object-contain fade-in"
                 onerror="this.onerror=null; this.src='/api/placeholder-image';"
               >
             `;
+            container.dataset.loaded = 'true';
+            observerInstance.unobserve(card);
           } else {
-            // No preview available, restore original or show a generic placeholder
-            console.warn(`No preview or fallback for docId: ${documentId}, filename: ${filename}. Data:`, data);
-            container.innerHTML = originalContent; // Or a more specific placeholder
+            // No preview available from initial API call, do not unobserve yet.
+            // Error will be caught by .catch block to try direct URL fallback.
+            console.warn(`No preview or fallback from initial API for docId: ${documentId}, filename: ${filename}. Data:`, data);
+            throw new Error('No preview or fallback URL from initial API.'); // Trigger .catch
           }
         })
-        .catch(error => {
-          console.error('Initial error loading preview:', error);
-          // Log the filename being used for the fallback
-          console.log(`[Fallback] Document ID: ${documentId}, Filename value: ${filename}`);
-          console.log(`[Fallback] Encoded filename value: ${encodeURIComponent(filename)}`);
-          // Attempt to load direct URL as a fallback
+        .catch(error => { // Catches errors from fetch() or the .then() block above
+          console.error('Initial error or no preview from API:', error);
+          console.log(`[Fallback Attempt] Document ID: ${documentId}, Filename: ${filename}`);
+          
           fetch(`/search/fallback_to_direct_url?document_id=${documentId}&filename=${encodeURIComponent(filename)}`)
             .then(fallbackResponse => {
               if (!fallbackResponse.ok) {
@@ -118,7 +122,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.log(`Using direct URL fallback for ${filename}: ${fallbackData.direct_url}`);
                 container.innerHTML = `
                   <div class="flex flex-col items-center justify-center h-full p-4 text-center">
-                    <p class="mb-2 text-sm text-red-600">Preview generation failed.</p>
+                    <p class="mb-2 text-sm text-red-600">Preview generation may have failed.</p>
                     <a 
                       href="${fallbackData.direct_url}" 
                       target="_blank" 
@@ -129,20 +133,43 @@ document.addEventListener('DOMContentLoaded', function() {
                     </a>
                   </div>
                 `;
+                container.dataset.loaded = 'true'; // Considered "loaded" as we provided a link
+                observerInstance.unobserve(card);
               } else {
-                throw new Error('Fallback URL not provided in response.');
+                // Fallback URL not provided, restore original content or show generic error
+                console.warn(`Fallback URL not provided for docId: ${documentId}, filename: ${filename}.`);
+                container.innerHTML = `
+                  <div class="flex flex-col items-center justify-center h-full p-4 text-center">
+                    <p class="mb-2 text-sm text-red-600">Preview unavailable.</p>
+                    <p class="text-xs text-gray-500">Could not load preview or direct link.</p>
+                  </div>
+                `;
+                // Do NOT set loaded=true, do NOT unobserve. Allow re-attempts.
               }
             })
             .catch(fallbackError => {
               console.error('Error loading direct URL fallback:', fallbackError);
-              // Restore original content or show a generic error message if fallback also fails
               container.innerHTML = `
                 <div class="flex flex-col items-center justify-center h-full p-4 text-center">
                   <p class="mb-2 text-sm text-red-600">Preview unavailable.</p>
                   <p class="text-xs text-gray-500">Could not load preview or direct link.</p>
                 </div>
               `;
+              // Do NOT set loaded=true, do NOT unobserve. Allow re-attempts.
+            })
+            .finally(() => {
+              container.dataset.loading = 'false'; // Clear loading flag after fallback attempt
             });
+        })
+        .finally(() => {
+          // This finally block is for the primary fetch. 
+          // If an error occurred and we went to the fallback, 
+          // the loading flag is handled by the fallback's finally.
+          // If primary fetch succeeded, we need to clear loading here.
+          if (container.dataset.loaded === 'true') { // Only clear if successfully loaded by primary
+             container.dataset.loading = 'false';
+          }
+          // If primary fetch failed and went to .catch, the .catch's .finally will handle it.
         });
     }
     
