@@ -22,13 +22,20 @@ search_service = SearchService()
 storage_service = MinIOStorage()  # Added storage service instance
 
 
+def custom_make_cache_key(*args, **kwargs):
+    """
+    Custom cache key that includes the X-Requested-With header
+    to differentiate between AJAX and regular requests.
+    """
+    path = request.path
+    query_string = request.query_string.decode("utf-8")
+    ajax_header = request.headers.get("X-Requested-With", "")
+    return f"{path}?{query_string}|ajax:{ajax_header}"
+
+
 @search_routes.route("/")
 @monitor_query
-@cache.cached(
-    timeout=CACHE_TIMEOUTS["SEARCH"],
-    query_string=True,
-    vary_on_headers=["X-Requested-With"],
-)
+@cache.cached(timeout=CACHE_TIMEOUTS["SEARCH"], make_cache_key=custom_make_cache_key)
 def search_documents():
     """Search documents with multiple strategies and filters"""
     start_time = time.time()
