@@ -253,57 +253,8 @@
   {% endblock %} {% block scripts %}
   <script src="{{ url_for('static', filename='js/search.js') }}"></script>
   <script>
-    document.addEventListener("DOMContentLoaded", function () {
-      // Track when search results are in viewport
-      const observer = new IntersectionObserver(
-        (entries) => {
-          entries.forEach((entry) => {
-            // When a result card enters viewport, load its preview if not already loaded
-            if (entry.isIntersecting) {
-              const card = entry.target;
-              const previewContainer = card.querySelector(".preview-container");
-              if (
-                previewContainer &&
-                previewContainer.dataset.loaded === "false"
-              ) {
-                loadPreview(
-                  previewContainer,
-                  previewContainer.dataset.filename
-                );
-                previewContainer.dataset.loaded = "true";
-              }
-              // Unobserve after loading
-              observer.unobserve(card);
-            }
-          });
-        },
-        {
-          rootMargin: "100px", // Load when within 100px of viewport
-        }
-      );
-
-      // Observe all document cards
-      document.querySelectorAll(".document-card").forEach((card) => {
-        observer.observe(card);
-      });
-
-      // Function to load preview asynchronously
-      function loadPreview(container, filename) {
-        const placeholderHtml = container.innerHTML; // Save placeholder
-
-        fetch(`/api/preview/${encodeURIComponent(filename)}`)
-          .then((response) => response.json())
-          .then((data) => {
-            if (data.preview) {
-              container.innerHTML = `<img src="${data.preview}" alt="Preview of ${filename}" class="preview-image fade-in">`;
-            }
-          })
-          .catch((error) => {
-            console.error("Error loading preview:", error);
-            container.innerHTML = placeholderHtml; // Restore placeholder on error
-          });
-      }
-    });
+    // Conflicting preview loading logic has been removed.
+    // Preview loading is now handled by the global preview-loader.js
 
     // Taxonomy Filter Functions
     function updateTaxonomyFilter(type, value) {
