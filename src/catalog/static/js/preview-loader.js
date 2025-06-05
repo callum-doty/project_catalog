@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', function() {
               const filename = previewContainer.dataset.filename;
 
               if (documentId && filename) {
+                previewContainer.dataset.loading = 'true'; // Set loading flag *before* calling loadDocumentPreview
                 // Pass card and observerInstance to handle unobserving on success
                 loadDocumentPreview(previewContainer, documentId, filename, card, observerInstance);
               } else {
@@ -49,7 +50,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function loadDocumentPreview(container, documentId, filename, card, observerInstance) {
       // Store the original content for fallback if all attempts fail
       const originalContent = container.innerHTML; 
-      container.dataset.loading = 'true'; // Mark as attempting to load
+      // container.dataset.loading = 'true'; // This is now set by the IntersectionObserver callback
       
       // Show loading indicator
       container.innerHTML = `
