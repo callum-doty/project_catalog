@@ -212,7 +212,7 @@ class SearchService:
                     )
                 )
 
-                return combined_query
+                return combined_query.distinct()
 
             else:
                 # Fall back to basic ILIKE search
@@ -251,7 +251,7 @@ class SearchService:
                 if conditions:
                     combined_query = combined_query.filter(or_(*conditions))
 
-                return combined_query
+                return combined_query.distinct()
 
         except Exception as e:
             self.logger.error(f"Error in keyword search: {str(e)}", exc_info=True)
@@ -410,7 +410,7 @@ class SearchService:
                 )
             )
 
-            return combined_query
+            return combined_query.distinct()
 
         except Exception as e:
             self.logger.error(f"Vector search error: {str(e)}")

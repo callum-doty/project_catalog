@@ -160,17 +160,37 @@ def search_documents():
 
         # Check for AJAX request
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-            # Return JSON for AJAX requests
+            # For AJAX requests, render cards to HTML server-side
+            cards_html_list = []
+            if formatted_documents:
+                doc_card_template = current_app.jinja_env.get_template(
+                    "components/cards/document_card.html"
+                )
+                doc_card_macro = getattr(
+                    doc_card_template.module, "document_card", None
+                )
+
+                if doc_card_macro:
+                    for doc_data_dict in formatted_documents:
+                        card_html = doc_card_macro(doc=doc_data_dict)
+                        cards_html_list.append(card_html)
+                else:
+                    current_app.logger.error(
+                        "Could not load document_card macro from components/cards/document_card.html"
+                    )
+
+            # Ensure expanded_query_list is suitable for JSON
+            # expanded_query_list is already a list (potentially of one item, or empty if original query was None)
+            final_expanded_terms = []
+            if expanded_query_list and expanded_query_list[0] is not None:
+                final_expanded_terms = expanded_query_list
+
             return jsonify(
                 {
-                    "results": formatted_documents,
+                    "results_html": cards_html_list,  # Send list of HTML strings
                     "pagination": pagination,
                     "taxonomy_facets": taxonomy_facets,
-                    "expanded_terms": (
-                        expanded_query_list
-                        if isinstance(expanded_query, set)
-                        else expanded_query
-                    ),
+                    "expanded_terms": final_expanded_terms,
                     "response_time_ms": round(response_time, 2),
                     "query": query,
                 }

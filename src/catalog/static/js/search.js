@@ -214,8 +214,8 @@ function updateResults(data) {
         return;
     }
 
-    // Check if we have the new data structure
-    const results = data.results || [];
+    // Check if we have the new data structure (results_html)
+    const resultsHtml = data.results_html || [];
     const pagination = data.pagination || null;
 
     // Store response time for display
@@ -224,7 +224,7 @@ function updateResults(data) {
     }
 
     // Handle empty results
-    if (!results || !Array.isArray(results) || results.length === 0) {
+    if (!resultsHtml || !Array.isArray(resultsHtml) || resultsHtml.length === 0) {
         const noResultsDiv = document.createElement('div');
         noResultsDiv.className = 'col-span-1 md:col-span-2 lg:col-span-3 text-center py-8';
         noResultsDiv.innerHTML = `
@@ -235,150 +235,45 @@ function updateResults(data) {
         `;
         grid.appendChild(noResultsDiv);
 
-        updateDocumentCount(0);
+        updateDocumentCount(0, pagination); // Pass pagination for consistency
         updatePagination(null);
         return;
     }
 
-    // Build the grid efficiently
-    results.forEach(doc => {
-        // Create a card safely
+    // Build the grid efficiently using pre-rendered HTML
+    const fragment = document.createDocumentFragment();
+    resultsHtml.forEach(cardHtmlString => {
         try {
-            const card = document.createElement('div');
-            card.className = 'bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow';
-
-            // Start building the HTML structure
-            let cardHTML = `
-                <div class="w-full h-48 bg-gray-100 flex items-center justify-center">
-                    ${doc.preview
-                        ? `<img src="${doc.preview}" 
-                               alt="Preview of ${doc.filename || 'document'}" 
-                               class="w-full h-full object-contain preview-image"
-                               onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzY2NiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik0xNCAySDZhMiAyIDAgMCAwLTIgMnYxNmEyIDIgMCAwIDAgMiAyaDEyYTIgMiAwIDAgMCAyLTJWOHoiPjwvcGF0aD48cG9seWxpbmUgcG9pbnRzPSIxNCAyIDE0IDggMjAgOCI+PC9wb2x5bGluZT48L3N2Zz4='; this.classList.add('fallback-icon');">`
-                        : `<div class="flex flex-col items-center text-gray-400">
-                               <svg class="w-12 h-12 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                   <path stroke-linecap="round" 
-                                         stroke-linejoin="round" 
-                                         stroke-width="2" 
-                                         d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                               </svg>
-                               <span>No preview available</span>
-                           </div>`
-                    }
-                </div>
-                
-                <div class="p-6">
-                    <h3 class="text-lg font-semibold text-gray-900 mb-2">${doc.filename || 'Untitled Document'}</h3>
-                    <p class="text-sm text-gray-500 mb-2">Uploaded: ${doc.upload_date || 'Unknown date'}</p>
-            `;
-
-            // Add hierarchical keywords if available
-            if (doc.hierarchical_keywords && doc.hierarchical_keywords.length > 0) {
-                cardHTML += `
-                    <div class="mb-3">
-                        <div class="flex flex-wrap gap-1 mt-1">
-                `;
-                
-                doc.hierarchical_keywords.forEach(kw => {
-                    if (kw && kw.term) {
-                        cardHTML += `
-                            <span class="keyword-badge inline-flex flex-col px-2 py-1 rounded-md text-xs bg-blue-50 text-blue-700">
-                                <span>${kw.term}</span>
-                                <span class="keyword-category text-blue-400">${kw.subcategory || ''}</span>
-                            </span>
-                        `;
-                    }
-                });
-                
-                cardHTML += `
-                        </div>
-                    </div>
-                `;
+            // Create a temporary div to parse the HTML string
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = cardHtmlString.trim(); // .trim() to remove potential leading/trailing whitespace
+            
+            // Append the actual card element (the first child of tempDiv) to the fragment
+            if (tempDiv.firstChild) {
+                fragment.appendChild(tempDiv.firstChild);
             }
-            
-            // Add summary
-            cardHTML += `
-                <div class="mb-4">
-                    <p class="text-sm text-gray-600 line-clamp-3">${doc.summary || 'No summary available'}</p>
-                </div>
-            `;
-            
-            // Add key details
-            cardHTML += `<div class="grid grid-cols-2 gap-2 text-xs">`;
-            
-            if (doc.document_type) {
-                cardHTML += `
-                    <div class="flex items-center">
-                        <span class="text-gray-500 mr-1">Type:</span>
-                        <span class="text-gray-700">${doc.document_type}</span>
-                    </div>
-                `;
-            }
-            
-            if (doc.election_year) {
-                cardHTML += `
-                    <div class="flex items-center">
-                        <span class="text-gray-500 mr-1">Year:</span>
-                        <span class="text-gray-700">${doc.election_year}</span>
-                    </div>
-                `;
-            }
-            
-            if (doc.location) {
-                cardHTML += `
-                    <div class="flex items-center">
-                        <span class="text-gray-500 mr-1">Location:</span>
-                        <span class="text-gray-700">${doc.location}</span>
-                    </div>
-                `;
-            }
-            
-            if (doc.document_tone) {
-                cardHTML += `
-                    <div class="flex items-center">
-                        <span class="text-gray-500 mr-1">Tone:</span>
-                        <span class="text-gray-700">${doc.document_tone}</span>
-                    </div>
-                `;
-            }
-            
-            cardHTML += `</div>`;
-            
-            cardHTML += `
-                <div class="mt-4">
-                    <a href="/document/${encodeURIComponent(doc.filename || 'Untitled Document')}" 
-                       target="_blank" 
-                       rel="noopener noreferrer"
-                       class="view-document-button w-full block text-center px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
-                        View Document
-                    </a>
-                </div>
-            `;
-            
-            cardHTML += `</div>`;
-            
-            // Set the HTML content
-            card.innerHTML = cardHTML;
-            grid.appendChild(card);
         } catch (err) {
-            console.error("Error creating document card:", err);
+            console.error("Error parsing or appending document card HTML:", err);
         }
     });
+    grid.appendChild(fragment);
+
 
     // Update document count and pagination
     try {
         if (pagination) {
-            updateDocumentCount(pagination.total, pagination);
+            updateDocumentCount(pagination.total, pagination); // Use pagination.total for accuracy
             updatePagination(pagination);
         } else {
-            updateDocumentCount(results.length);
+            // Fallback if pagination object is missing, though it should always be present with results_html
+            updateDocumentCount(resultsHtml.length, null); 
             updatePagination(null);
         }
     } catch (error) {
         console.error("Error updating document count and pagination:", error);
     }
 
-    // Reattach event handlers for image error handling
+    // Reattach event handlers for image error handling and feedback buttons
     try {
         const previewImages = document.querySelectorAll('.preview-image');
         previewImages.forEach(img => {
