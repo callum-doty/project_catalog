@@ -1,58 +1,10 @@
 // static/js/document-preview-loader.js
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Find all document cards
-    const documentCards = document.querySelectorAll('.document-card');
-    
-    // Initialize Intersection Observer for lazy loading previews
-    const previewObserver = new IntersectionObserver(
-      (entries, observerInstance) => { // observerInstance is the observer itself
-        entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            const card = entry.target;
-            const previewContainer = card.querySelector('.preview-container');
-            
-            // Check if not already loaded and not currently attempting to load
-            if (previewContainer && 
-                previewContainer.dataset.loaded !== 'true' && 
-                previewContainer.dataset.loading !== 'true') {
-                  
-              const documentId = previewContainer.dataset.documentId;
-              const filename = previewContainer.dataset.filename;
-
-              if (documentId && filename) {
-                previewContainer.dataset.loading = 'true'; // Set loading flag *before* calling loadDocumentPreview
-                // Pass card and observerInstance to handle unobserving on success
-                loadDocumentPreview(previewContainer, documentId, filename, card, observerInstance);
-              } else {
-                console.warn('Missing documentId or filename for preview. Unobserving to prevent loops.', previewContainer.dataset);
-                observerInstance.unobserve(card); // Unobserve if data is bad
-              }
-            } else if (previewContainer && previewContainer.dataset.loaded === 'true') {
-              // If it's already successfully loaded, ensure it's unobserved
-              observerInstance.unobserve(card);
-            }
-          }
-        });
-      },
-      {
-        rootMargin: '100px', // Start loading when document card is within 100px of viewport
-        threshold: 0.1
-      }
-    );
-    
-    // Start observing all document cards
-    documentCards.forEach(card => {
-      previewObserver.observe(card);
-    });
-    
     // Function to load document preview
     function loadDocumentPreview(container, documentId, filename, card, observerInstance) {
-      // Store the original content for fallback if all attempts fail
-      const originalContent = container.innerHTML; 
-      // container.dataset.loading = 'true'; // This is now set by the IntersectionObserver callback
-      
-      // Show loading indicator
+      // dataset.loading is true, set by IntersectionObserver callback
+
       container.innerHTML = `
         <div class="flex items-center justify-center h-full">
           <div class="animate-pulse flex flex-col items-center">
@@ -62,7 +14,6 @@ document.addEventListener('DOMContentLoaded', function() {
         </div>
       `;
       
-      // Fetch preview from API
       fetch(`/api/preview/${documentId}/${encodeURIComponent(filename)}`)
         .then(response => {
           if (!response.ok) {
@@ -88,6 +39,7 @@ document.addEventListener('DOMContentLoaded', function() {
               </object>
             `;
             container.dataset.loaded = 'true';
+            container.dataset.loading = 'false';
             observerInstance.unobserve(card);
           } else if (data.status === 'success' && data.url) {
             container.innerHTML = `
@@ -99,18 +51,15 @@ document.addEventListener('DOMContentLoaded', function() {
               >
             `;
             container.dataset.loaded = 'true';
+            container.dataset.loading = 'false';
             observerInstance.unobserve(card);
           } else {
-            // No preview available from initial API call, do not unobserve yet.
-            // Error will be caught by .catch block to try direct URL fallback.
             console.warn(`No preview or fallback from initial API for docId: ${documentId}, filename: ${filename}. Data:`, data);
             throw new Error('No preview or fallback URL from initial API.'); // Trigger .catch
           }
         })
-        .catch(error => { // Catches errors from fetch() or the .then() block above
+        .catch(error => { // Catches errors from primary fetch chain
           console.error('Initial error or no preview from API:', error);
-          console.log(`[Fallback Attempt] Document ID: ${documentId}, Filename: ${filename}`);
-          
           fetch(`/search/fallback_to_direct_url?document_id=${documentId}&filename=${encodeURIComponent(filename)}`)
             .then(fallbackResponse => {
               if (!fallbackResponse.ok) {
@@ -137,48 +86,109 @@ document.addEventListener('DOMContentLoaded', function() {
                 container.dataset.loaded = 'true'; // Considered "loaded" as we provided a link
                 observerInstance.unobserve(card);
               } else {
-                // Fallback URL not provided, restore original content or show generic error
                 console.warn(`Fallback URL not provided for docId: ${documentId}, filename: ${filename}.`);
-                container.innerHTML = `
-                  <div class="flex flex-col items-center justify-center h-full p-4 text-center">
-                    <p class="mb-2 text-sm text-red-600">Preview unavailable.</p>
-                    <p class="text-xs text-gray-500">Could not load preview or direct link.</p>
-                  </div>
-                `;
-                // Do NOT set loaded=true, do NOT unobserve. Allow re-attempts.
+                container.innerHTML = `<div class="p-4 text-center text-sm text-gray-500">Preview unavailable.</div>`;
               }
             })
             .catch(fallbackError => {
               console.error('Error loading direct URL fallback:', fallbackError);
-              container.innerHTML = `
-                <div class="flex flex-col items-center justify-center h-full p-4 text-center">
-                  <p class="mb-2 text-sm text-red-600">Preview unavailable.</p>
-                  <p class="text-xs text-gray-500">Could not load preview or direct link.</p>
-                </div>
-              `;
-              // Do NOT set loaded=true, do NOT unobserve. Allow re-attempts.
+              container.innerHTML = `<div class="p-4 text-center text-sm text-red-600">Preview unavailable. Error during fallback.</div>`;
             })
             .finally(() => {
-              container.dataset.loading = 'false'; // Clear loading flag after fallback attempt
+              // This finally is for the fallback fetch chain.
+              // Regardless of fallback success or failure, the loading attempt for this card is over.
+              container.dataset.loading = 'false';
             });
-        })
-        .finally(() => {
-          // This finally block is for the primary fetch. 
-          // If an error occurred and we went to the fallback, 
-          // the loading flag is handled by the fallback's finally.
-          // If primary fetch succeeded, we need to clear loading here.
-          if (container.dataset.loaded === 'true') { // Only clear if successfully loaded by primary
-             container.dataset.loading = 'false';
-          }
-          // If primary fetch failed and went to .catch, the .catch's .finally will handle it.
         });
     }
+
+    // Initialize Intersection Observer
+    const previewObserver = new IntersectionObserver(
+      (entries, observerInstance) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            const card = entry.target;
+            const previewContainer = card.querySelector('.preview-container');
+            
+            if (previewContainer && 
+                previewContainer.dataset.loaded !== 'true' && 
+                previewContainer.dataset.loading !== 'true') {
+                  
+              const documentId = previewContainer.dataset.documentId;
+              const filename = previewContainer.dataset.filename;
+
+              if (documentId && filename) {
+                previewContainer.dataset.loading = 'true'; 
+                loadDocumentPreview(previewContainer, documentId, filename, card, observerInstance);
+              } else {
+                console.warn('Missing documentId or filename for preview. Unobserving.', previewContainer.dataset);
+                observerInstance.unobserve(card); // Unobserve if data is bad to prevent loops
+                if(previewContainer) previewContainer.dataset.loading = 'false'; // Clear loading if we unobserve due to bad data
+              }
+            } else if (previewContainer && previewContainer.dataset.loaded === 'true') {
+              observerInstance.unobserve(card); // Already loaded, ensure it's unobserved
+            }
+          }
+        });
+      },
+      {
+        rootMargin: '200px', // Load when card is 200px away from viewport
+        threshold: 0.01     // Trigger if even 1% of the card is visible
+      }
+    );
+
+    const observeCard = (cardElement) => {
+        if (cardElement.nodeType === 1 && cardElement.matches && cardElement.matches('.document-card')) {
+            const previewContainer = cardElement.querySelector('.preview-container');
+            // Only observe if it has a preview container and hasn't been passed to observer yet
+            if (previewContainer && previewContainer.dataset.observedByLoader !== 'true') {
+                 previewObserver.observe(cardElement);
+                 previewContainer.dataset.observedByLoader = 'true'; 
+            }
+        }
+    };
+
+    // Function to initialize observation for existing cards
+    const initObservationForExistingCards = () => {
+        document.querySelectorAll('.document-card').forEach(observeCard);
+    };
+
+    // Observe cards after the entire page (including styles and images) has loaded
+    if (document.readyState === 'complete') {
+        initObservationForExistingCards();
+    } else {
+        window.addEventListener('load', initObservationForExistingCards);
+    }
+
+    // Setup MutationObserver to watch for dynamically added cards
+    // Target a specific container if known, otherwise fall back to document.body
+    const targetNodeForMutations = document.getElementById('search-results-container') || 
+                                   document.getElementById('document-list-container') || // Common alternative ID
+                                   document.body; 
     
-    // Handle placeholder fallbacks
-    document.querySelectorAll('.preview-image').forEach(img => {
-      img.onerror = function() {
-        this.onerror = null;
-        this.src = '/api/placeholder-image'; // Updated to API endpoint
-      };
+    const domMutationObserver = new MutationObserver((mutationsList) => {
+        for (const mutation of mutationsList) {
+            if (mutation.type === 'childList') {
+                mutation.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) { // Check if it's an element node
+                        observeCard(node); // Check if the added node itself is a card
+                        // Also check for document-card descendants if a wrapper element was added
+                        node.querySelectorAll('.document-card').forEach(observeCard);
+                    }
+                });
+            }
+        }
     });
-  });
+    domMutationObserver.observe(targetNodeForMutations, { childList: true, subtree: true });
+
+    // General fallback for images with class 'preview-image' that might exist outside this loader's scope
+    // Note: loadDocumentPreview sets its own onerror handler for the images it creates.
+    document.querySelectorAll('img.preview-image').forEach(img => {
+      if (!img.onerror) { // Avoid overriding specific onerror handlers
+        img.onerror = function() {
+          this.onerror = null; // Prevent infinite loop if placeholder also fails
+          this.src = '/api/placeholder-image'; 
+        };
+      }
+    });
+});
