@@ -4,6 +4,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // Function to load document preview
     function loadDocumentPreview(container, documentId, filename, card, observerInstance) {
       // dataset.loading is true, set by IntersectionObserver callback
+      console.log('[PreviewLoader] loadDocumentPreview called with:', { 
+        documentId, 
+        filename, 
+        card, 
+        containerDataset: { ...container.dataset } 
+      });
 
       container.innerHTML = `
         <div class="flex items-center justify-center h-full">
@@ -109,6 +115,21 @@ document.addEventListener('DOMContentLoaded', function() {
           if (entry.isIntersecting) {
             const card = entry.target;
             const previewContainer = card.querySelector('.preview-container');
+
+            // Enhanced Logging
+            console.log('[PreviewLoader] Intersecting card:', card);
+            if (previewContainer) {
+                console.log('[PreviewLoader] PreviewContainer details:', {
+                    element: previewContainer,
+                    documentId: previewContainer.dataset.documentId,
+                    filename: previewContainer.dataset.filename,
+                    loaded: previewContainer.dataset.loaded,
+                    loading: previewContainer.dataset.loading,
+                    observedByLoader: previewContainer.dataset.observedByLoader
+                });
+            } else {
+                console.log('[PreviewLoader] No previewContainer found for card:', card);
+            }
             
             if (previewContainer && 
                 previewContainer.dataset.loaded !== 'true' && 
