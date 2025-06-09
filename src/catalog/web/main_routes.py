@@ -77,6 +77,18 @@ def check_password(password):
     return password == correct_password
 
 
+def check_upload_password(password):
+    """Check if the upload password is valid"""
+    correct_password = os.environ.get(
+        "UPLOAD_PASSWORD", "your_upload_password_fallback"
+    )  # It's good practice to have a fallback
+    if not correct_password or correct_password == "your_upload_password_fallback":
+        logger.warning(
+            "UPLOAD_PASSWORD environment variable is not set or using fallback."
+        )
+    return password == correct_password
+
+
 def password_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -252,6 +264,13 @@ def home():
 
 @main_routes.route("/upload", methods=["POST"])
 def upload_file():
+    # Check upload password
+    upload_password = request.form.get("upload_password")
+    if not upload_password or not check_upload_password(upload_password):
+        flash("Incorrect upload password.", "error")
+        # Redirect to home or wherever the form is displayed, adjust as needed
+        return redirect(request.referrer or url_for("main_routes.home"))
+
     files = request.files.getlist("file")  # Get list of files
 
     if not files or all(f.filename == "" for f in files):
