@@ -141,21 +141,159 @@
       {% endif %}
     </div>
 
-    <!-- Hierarchical Keywords -->
+    <!-- Taxonomy Mapping Indicator -->
     {% if doc.hierarchical_keywords %}
     <div class="mb-3">
-      <h4 class="text-xs font-medium text-gray-700 mb-1">Categories</h4>
-      <div class="flex flex-wrap gap-1">
-        {% for kw in doc.hierarchical_keywords %}
-        <span
-          class="inline-flex flex-col px-2 py-1 rounded-md text-xs bg-blue-50 text-blue-700"
+      <h4 class="text-xs font-medium text-gray-700 mb-2 flex items-center">
+        <svg
+          class="w-3 h-3 mr-1 text-gray-600"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
         >
-          <span>{{ kw.term }}</span>
-          {% if kw.subcategory %}
-          <span class="text-[10px] text-blue-400">{{ kw.subcategory }}</span>
-          {% endif %}
-        </span>
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+          ></path>
+        </svg>
+        Taxonomy Mapping
+      </h4>
+
+      <!-- Primary Categories Overview -->
+      {% set primary_categories = doc.hierarchical_keywords |
+      map(attribute='primary_category') | list | unique %} {% if
+      primary_categories %}
+      <div class="mb-2">
+        <div class="text-[10px] font-medium text-gray-500 mb-1">
+          PRIMARY CATEGORIES
+        </div>
+        <div class="flex flex-wrap gap-1">
+          {% for primary in primary_categories %} {% if primary %}
+          <span
+            class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-800 border border-purple-200"
+          >
+            {{ primary }}
+          </span>
+          {% endif %} {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Detailed Taxonomy Hierarchy -->
+      <div class="space-y-1">
+        {% for kw in doc.hierarchical_keywords %}
+        <div
+          class="flex items-center text-xs bg-gray-50 rounded-md p-2 border-l-4 border-blue-400"
+        >
+          <!-- Hierarchy Path -->
+          <div class="flex-1">
+            <div class="flex items-center space-x-1 text-gray-600">
+              {% if kw.primary_category %}
+              <span class="font-medium text-purple-700"
+                >{{ kw.primary_category }}</span
+              >
+              <svg
+                class="w-3 h-3 text-gray-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9 5l7 7-7 7"
+                ></path>
+              </svg>
+              {% endif %} {% if kw.subcategory %}
+              <span class="font-medium text-blue-600"
+                >{{ kw.subcategory }}</span
+              >
+              <svg
+                class="w-3 h-3 text-gray-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9 5l7 7-7 7"
+                ></path>
+              </svg>
+              {% endif %}
+
+              <span class="font-semibold text-gray-900">{{ kw.term }}</span>
+            </div>
+
+            <!-- Relevance Score if available -->
+            {% if kw.relevance_score and kw.relevance_score > 0 %}
+            <div class="mt-1 flex items-center">
+              <div class="text-[10px] text-gray-500 mr-2">Relevance:</div>
+              <div class="flex-1 bg-gray-200 rounded-full h-1.5 max-w-16">
+                <div
+                  class="bg-blue-500 h-1.5 rounded-full"
+                  style="--relevance-width: {{ (kw.relevance_score * 100) | round }}%; width: var(--relevance-width);"
+                ></div>
+              </div>
+              <span class="text-[10px] text-gray-600 ml-1"
+                >{{ (kw.relevance_score * 100) | round }}%</span
+              >
+            </div>
+            {% endif %}
+          </div>
+
+          <!-- Category Color Indicator -->
+          <div class="ml-2 flex flex-col items-center">
+            {% if kw.primary_category %} {% set category_colors = { 'Policy
+            Issues & Topics': 'bg-green-400', 'Candidate & Entity Identifiers':
+            'bg-blue-400', 'Communication Style & Format': 'bg-yellow-400',
+            'Geographic & Demographic Targeting': 'bg-red-400', 'Campaign
+            Context': 'bg-purple-400', 'Document Metadata': 'bg-gray-400' } %}
+            <div
+              class="w-3 h-3 rounded-full {{ category_colors.get(kw.primary_category, 'bg-gray-400') }} border border-white shadow-sm"
+              title="{{ kw.primary_category }}"
+            ></div>
+            {% endif %}
+          </div>
+        </div>
         {% endfor %}
+      </div>
+
+      <!-- Taxonomy Legend -->
+      <div class="mt-2 pt-2 border-t border-gray-200">
+        <div class="text-[10px] font-medium text-gray-500 mb-1">
+          CATEGORY LEGEND
+        </div>
+        <div class="flex flex-wrap gap-1 text-[9px]">
+          <div class="flex items-center">
+            <div class="w-2 h-2 rounded-full bg-green-400 mr-1"></div>
+            <span class="text-gray-600">Policy</span>
+          </div>
+          <div class="flex items-center">
+            <div class="w-2 h-2 rounded-full bg-blue-400 mr-1"></div>
+            <span class="text-gray-600">Candidate</span>
+          </div>
+          <div class="flex items-center">
+            <div class="w-2 h-2 rounded-full bg-yellow-400 mr-1"></div>
+            <span class="text-gray-600">Style</span>
+          </div>
+          <div class="flex items-center">
+            <div class="w-2 h-2 rounded-full bg-red-400 mr-1"></div>
+            <span class="text-gray-600">Geographic</span>
+          </div>
+          <div class="flex items-center">
+            <div class="w-2 h-2 rounded-full bg-purple-400 mr-1"></div>
+            <span class="text-gray-600">Campaign</span>
+          </div>
+          <div class="flex items-center">
+            <div class="w-2 h-2 rounded-full bg-gray-400 mr-1"></div>
+            <span class="text-gray-600">Metadata</span>
+          </div>
+        </div>
       </div>
     </div>
     {% endif %}
@@ -224,6 +362,54 @@
       {% endif %}
     </div>
     {% endif %}
+
+    <!-- Embedding Status Indicator -->
+    <div
+      class="mt-4 pt-3 border-t border-gray-200 flex items-center justify-between"
+    >
+      <span class="text-xs font-medium text-gray-700">Embeddings Status:</span>
+      <div class="flex items-center">
+        {% if doc.search_vector is not none %}
+        <!-- Green checkmark for documents with embeddings -->
+        <div class="flex items-center text-green-700">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="h-4 w-4 mr-1"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M5 13l4 4L19 7"
+            />
+          </svg>
+          <span class="text-xs font-medium">Available</span>
+        </div>
+        {% else %}
+        <!-- Red X for documents without embeddings -->
+        <div class="flex items-center text-red-700">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="h-4 w-4 mr-1"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+          <span class="text-xs font-medium">Not Available</span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
 
     <!-- Removed the View Document button from here, as it's now in the top left corner -->
   </div>

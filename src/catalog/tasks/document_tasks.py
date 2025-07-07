@@ -49,7 +49,7 @@ class DocumentProcessorTask(Task):
     @property
     def llm_service(self):
         if self._llm_service is None:
-            from catalog.services.llm_service import LLMService
+            from src.catalog.services.llm_service import LLMService
 
             self._llm_service = LLMService()
         return self._llm_service
@@ -109,7 +109,7 @@ preview_service = PreviewService()
 def invalidate_document_cache(document_id):
     """Invalidate all cache related to a specific document"""
     # Import the SearchService here to avoid circular imports
-    from catalog.services.search_service import SearchService
+    from src.catalog.services.search_service import SearchService
 
     search_service = SearchService()
 
@@ -144,121 +144,6 @@ def invalidate_document_cache(document_id):
         logger.error(f"Error invalidating cache for document {document_id}: {str(e)}")
 
 
-def process_batch1(llm_service, filename, document_id):
-    """Process the first batch of document analysis (metadata and text extraction)"""
-    logger.info(f"Processing batch 1 for document {document_id}: {filename}")
-
-    try:
-        # Process metadata component with clear error handling
-        metadata_response = llm_service.analyze_document_modular(
-            filename, components=["metadata"]
-        )
-
-        if metadata_response and "document_analysis" in metadata_response:
-            logger.info("Metadata component processed successfully, storing results...")
-            success = store_partial_analysis(document_id, metadata_response)
-            if success:
-                logger.info("✅ Metadata component stored successfully")
-            else:
-                logger.error("❌ Failed to store metadata component")
-        else:
-            logger.error(
-                "❌ Metadata component processing failed or returned empty results"
-            )
-
-        # Process text component with clear error handling
-        text_response = llm_service.analyze_document_modular(
-            filename, components=["text"]
-        )
-
-        if text_response and "extracted_text" in text_response:
-            logger.info("Text component processed successfully, storing results...")
-            success = store_partial_analysis(document_id, text_response)
-            if success:
-                logger.info("✅ Text component stored successfully")
-                # Return True if at least the text component was stored
-                return True
-            else:
-                logger.error("❌ Failed to store text component")
-        else:
-            logger.error(
-                "❌ Text component processing failed or returned empty results"
-            )
-
-        # Verify if any core components were stored successfully
-        from src.catalog.tasks.analysis_utils import check_minimum_analysis
-
-        has_core = check_minimum_analysis(document_id)
-
-        return has_core
-
-    except Exception as e:
-        logger.error(f"Error in batch 1 processing: {str(e)}")
-        return False
-
-
-def process_batch2(llm_service, filename, document_id):
-    """Process the second batch of document analysis (classification, entities, design, keywords, communication)"""
-    logger.info(f"Processing batch 2 for document {document_id}: {filename}")
-
-    try:
-        # Process all batch 2 components together
-        batch2_response = llm_service.analyze_document_modular(
-            filename,
-            components=[
-                "classification",
-                "entities",
-                "design",
-                "keywords",
-                "communication",
-            ],
-        )
-
-        if batch2_response:
-            # First, store the basic components
-            success = store_partial_analysis(document_id, batch2_response)
-
-            # Then, specifically handle keyword mapping to taxonomy
-            if "hierarchical_keywords" in batch2_response:
-                # Get the LLM analysis ID
-                llm_analysis = LLMAnalysis.query.filter_by(
-                    document_id=document_id
-                ).first()
-                if llm_analysis:
-                    # Extract keywords from response
-                    keywords_data = []
-                    for kw in batch2_response.get("hierarchical_keywords", []):
-                        if isinstance(kw, dict) and "term" in kw:
-                            keywords_data.append(
-                                {
-                                    "keyword": kw["term"],
-                                    "category": kw.get("category", ""),
-                                    "relevance_score": kw.get("relevance_score", 0),
-                                }
-                            )
-
-                    # Map keywords to taxonomy
-                    map_keywords_to_taxonomy(
-                        document_id, llm_analysis.id, keywords_data
-                    )
-
-            if success:
-                logger.info("✅ Batch 2 components stored successfully")
-                return True
-            else:
-                logger.error("❌ Failed to store batch 2 components")
-        else:
-            logger.error(
-                "❌ Batch 2 components processing failed or returned empty results"
-            )
-
-        return False
-
-    except Exception as e:
-        logger.error(f"Error in batch 2 processing: {str(e)}")
-        return False
-
-
 @celery_app.task(bind=True, name="process_document")
 def process_document(self, filename, minio_path, document_id):
     """Process document through the pipeline using truly modular analysis"""
@@ -289,9 +174,11 @@ def process_document(self, filename, minio_path, document_id):
 
             llm_service = LLMService()
 
-            # Process in batches with clear error handling
-            batch1_success = process_batch1(llm_service, filename, document_id)
-            batch2_success = process_batch2(llm_service, filename, document_id)
+            # Process document with a single call
+            analysis_response = llm_service.analyze_document(filename)
+
+            if analysis_response:
+                store_partial_analysis(document_id, analysis_response)
 
             # Check if we have minimum required analysis
             has_minimum_analysis = check_minimum_analysis(document_id)

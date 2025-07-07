@@ -26,7 +26,7 @@ class Document(db.Model):
     page_count = db.Column(db.Integer, nullable=False)
     status = db.Column(db.Text, nullable=False)
     batch_jobs_id = db.Column(db.Integer, db.ForeignKey("batch_jobs.id"))
-    search_vector = db.Column(TSVECTOR)
+    search_vector = db.Column(Vector(3072), nullable=True)
     embeddings = db.Column(Vector(1536), nullable=True)
 
     # Fields for preview tracking
@@ -105,7 +105,6 @@ class DesignElement(db.Model):
     target_audience = db.Column(db.Text)
     campaign_name = db.Column(db.Text)
     visual_elements = db.Column(db.Text)
-    confidence = db.Column(db.BigInteger)
     created_date = db.Column(db.DateTime(timezone=True))
 
 
@@ -137,25 +136,11 @@ class Client(db.Model):
     document_id = db.Column(db.Integer, db.ForeignKey("documents.id"))
 
 
-class LLMKeyword(db.Model):
-    __tablename__ = "llm_keywords"
-    id = db.Column(db.Integer, primary_key=True)
-    llm_analysis_id = db.Column(db.Integer, db.ForeignKey("llm_analysis.id"))
-    keyword = db.Column(db.Text)
-    category = db.Column(db.Text)
-    relevance_score = db.Column(db.BigInteger)
-    taxonomy_id = db.Column(
-        db.Integer, db.ForeignKey("keyword_taxonomy.id"), nullable=True
-    )
-    taxonomy = db.relationship("KeywordTaxonomy", backref="llm_keywords", lazy="joined")
-
-
 class Classification(db.Model):
     __tablename__ = "classifications"
     id = db.Column(db.Integer, primary_key=True)
     document_id = db.Column(db.Integer, db.ForeignKey("documents.id"))
     category = db.Column(db.Text)
-    confidence = db.Column(db.BigInteger)
     classification_date = db.Column(db.DateTime(timezone=True))
 
 
@@ -168,9 +153,6 @@ class ExtractedText(db.Model):
     main_message = db.Column(db.Text)
     supporting_text = db.Column(db.Text)
     call_to_action = db.Column(db.Text)
-    candidate_name = db.Column(db.Text)
-    opponent_name = db.Column(db.Text)
-    confidence = db.Column(db.BigInteger)
     extraction_date = db.Column(db.DateTime(timezone=True))
 
 

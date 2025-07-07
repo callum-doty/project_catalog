@@ -39,79 +39,44 @@
       <div class="bg-white rounded-lg shadow-md p-4 mb-4 filter-by-category">
         <h3 class="text-lg font-medium mb-3">Filter by Category</h3>
 
-        <!-- Primary Categories Section -->
+        <!-- Hierarchical Taxonomy Section -->
         <div class="mb-4">
-          <h4 class="text-sm font-medium text-gray-700 mb-2">
-            Primary Categories
-          </h4>
-          <div class="space-y-1 facet-primary-categories">
-            {% if taxonomy_facets and taxonomy_facets.primary_categories and
-            taxonomy_facets.primary_categories|length > 0 %} {% for category in
-            taxonomy_facets.primary_categories %}
-            <div
-              class="facet-item {% if category.selected %}selected{% endif %}"
-              onclick="updateTaxonomyFilter('primary_category', '{{ category.name }}')"
+          {% for primary_name, primary_data in taxonomy_facets.items() %}
+          <div class="mb-2">
+            <h4
+              class="facet-item text-sm font-medium text-gray-700 mb-2 {% if primary_data.selected %}selected{% endif %}"
+              onclick="updateTaxonomyFilter('primary_category', '{{ primary_name }}')"
             >
-              <span>{{ category.name }}</span>
-              <span class="text-xs text-gray-500">({{ category.count }})</span>
+              {{ primary_name }}
+            </h4>
+            {% if primary_data.selected %}
+            <div class="ml-4">
+              {% for sub_name, sub_data in primary_data.subcategories.items() %}
+              <div class="mb-1">
+                <h5
+                  class="facet-item text-xs font-medium text-gray-600 {% if sub_data.selected %}selected{% endif %}"
+                  onclick="updateTaxonomyFilter('subcategory', '{{ sub_name }}')"
+                >
+                  {{ sub_name }}
+                </h5>
+                {% if sub_data.selected %}
+                <div class="ml-4">
+                  {% for term in sub_data.terms %}
+                  <div
+                    class="facet-item text-xs text-gray-500 {% if term.selected %}selected{% endif %}"
+                    onclick="updateTaxonomyFilter('specific_term', '{{ term.name }}')"
+                  >
+                    {{ term.name }}
+                  </div>
+                  {% endfor %}
+                </div>
+                {% endif %}
+              </div>
+              {% endfor %}
             </div>
-            {% endfor %} {% else %}
-            <div class="text-sm text-gray-500">No categories available</div>
             {% endif %}
           </div>
-        </div>
-
-        <!-- Subcategories (if primary category is selected) -->
-        <div
-          class="mb-4 subcategories-section"
-          {%
-          if
-          not
-          taxonomy_facets.subcategories
-          %}style="display: none;"
-          {%
-          endif
-          %}
-        >
-          <h4 class="text-sm font-medium text-gray-700 mb-2">Subcategories</h4>
-          <div class="space-y-1 facet-subcategories">
-            {% for subcategory in taxonomy_facets.subcategories %}
-            <div
-              class="facet-item {% if subcategory.selected %}selected{% endif %}"
-              onclick="updateTaxonomyFilter('subcategory', '{{ subcategory.name }}')"
-            >
-              <span>{{ subcategory.name }}</span>
-              <span class="text-xs text-gray-500"
-                >({{ subcategory.count }})</span
-              >
-            </div>
-            {% endfor %}
-          </div>
-        </div>
-
-        <div
-          class="mb-4 terms-section"
-          {%
-          if
-          not
-          taxonomy_facets.terms
-          %}style="display: none;"
-          {%
-          endif
-          %}
-        >
-          <h4 class="text-sm font-medium text-gray-700 mb-2">Terms</h4>
-          <div class="space-y-1 facet-terms">
-            {% for term in taxonomy_facets.terms %}
-            <div
-              class="facet-item {% if term.selected %}selected{% endif %}"
-              onclick="updateTaxonomyFilter('specific_term', '{{ term.name }}')"
-            >
-              <span>{{ term.name }}</span>
-              <span class="text-xs text-gray-500">({{ term.count }})</span>
-            </div>
-            {% endfor %}
-          </div>
+          {% endfor %}
         </div>
 
         {% if expanded_terms and expanded_terms|length > 1 %}

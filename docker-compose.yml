@@ -3,20 +3,10 @@ services:
     build: .
     env_file: .env
     ports:
-      - "0.0.0.0:5001:5000"
+      - "0.0.0.0:5002:5000"
     environment:
-      - FLASK_APP=src/wsgi.py
-      - DATABASE_URL=postgresql://custom_user:strong_password@db:5432/catalog_db
-      - SQLALCHEMY_DATABASE_URI=postgresql://custom_user:strong_password@db:5432/catalog_db
-      - FLASK_ENV=production
-      - MINIO_ACCESS_KEY=minioaccess
-      - MINIO_SECRET_KEY=miniosecret
-      - MINIO_BUCKET=documents
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - FLASK_ENV=development
+      - APP_SETTINGS=src.config.DockerDevelopmentConfig
       - PYTHONPATH=/app/src
     volumes:
       - .:/app
@@ -65,38 +55,28 @@ services:
 
   celery-worker:
     build: .
+    env_file: .env
     command: celery -A src.catalog.tasks.celery_app worker -Q document_processing,analysis,celery --loglevel=info
     volumes:
       - .:/app
     environment:
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - DATABASE_URL=postgresql://custom_user:strong_password@db:5432/catalog_db
-      - SQLALCHEMY_DATABASE_URI=postgresql://custom_user:strong_password@db:5432/catalog_db
-      - DROPBOX_ACCESS_TOKEN=${DROPBOX_ACCESS_TOKEN}
-      - DROPBOX_FOLDER_PATH=${DROPBOX_FOLDER_PATH}
-      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - FLASK_ENV=development
+      - APP_SETTINGS=src.config.DockerDevelopmentConfig
       - PYTHONPATH=/app/src
     depends_on:
       - redis
       - db
+      - minio
 
   celery-beat:
     build: .
+    env_file: .env
     command: celery -A src.catalog.tasks.celery_app beat --loglevel=info
     volumes:
       - .:/app
     environment:
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - DATABASE_URL=postgresql://custom_user:strong_password@db:5432/catalog_db
-      - SQLALCHEMY_DATABASE_URI=postgresql://custom_user:strong_password@db:5432/catalog_db
-      - DROPBOX_ACCESS_TOKEN=${DROPBOX_ACCESS_TOKEN}
-      - DROPBOX_FOLDER_PATH=${DROPBOX_FOLDER_PATH}
-      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - FLASK_ENV=development
+      - APP_SETTINGS=src.config.DockerDevelopmentConfig
       - PYTHONPATH=/app/src
     depends_on:
       - redis

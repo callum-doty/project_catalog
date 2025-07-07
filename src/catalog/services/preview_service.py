@@ -10,14 +10,55 @@ from werkzeug.utils import secure_filename
 import traceback
 from src.catalog import cache, db
 from src.catalog.constants import CACHE_TIMEOUTS, SUPPORTED_FILE_TYPES
+from pathlib import Path
+
+
+class LocalStorageFallback:
+    """Local storage fallback when MinIO is not available"""
+
+    def __init__(self, storage_path="./dev_storage"):
+        self.storage_path = Path(storage_path)
+        self.storage_path.mkdir(exist_ok=True)
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"Using local storage fallback: {self.storage_path}")
+
+    def get_file(self, filename):
+        """Get file from local storage"""
+        try:
+            file_path = self.storage_path / filename
+            if file_path.exists():
+                return file_path.read_bytes()
+            else:
+                self.logger.warning(f"File not found in local storage: {filename}")
+                return None
+        except Exception as e:
+            self.logger.error(f"Error reading file from local storage: {e}")
+            return None
+
+    def get_presigned_url(self, filename, bucket_name=None):
+        """Get URL for local file"""
+        file_path = self.storage_path / filename
+        if file_path.exists():
+            return f"/api/files/{filename}"
+        return None
 
 
 class PreviewService:
     def __init__(self):
-        self.storage = MinIOStorage()
+        self.logger = logging.getLogger(__name__)
+
+        # Try to initialize MinIO storage, fall back to local storage if it fails
+        try:
+            self.storage = MinIOStorage()
+            self.use_local_fallback = False
+            self.logger.info("Using MinIO storage for previews")
+        except Exception as e:
+            self.logger.warning(f"MinIO storage failed, using local fallback: {e}")
+            self.storage = LocalStorageFallback()
+            self.use_local_fallback = True
+
         self.supported_images = SUPPORTED_FILE_TYPES["IMAGES"]
         self.supported_pdfs = SUPPORTED_FILE_TYPES["DOCUMENTS"]
-        self.logger = logging.getLogger(__name__)
 
     # @cache.memoize(timeout=CACHE_TIMEOUTS["PREVIEW"]) # Caching needs to consider document_id if it's part of the key
     # For now, let's remove memoize here as the key would need document_id, or make filename globally unique.
@@ -68,11 +109,18 @@ class PreviewService:
             # If this synchronous call fails and returns a placeholder, the UI will show that.
             # The async task will then (hopefully) generate the real one.
             synchronous_preview = self._generate_preview_internal(
-                filename
-            )  # filename is passed
+                filename, document_id=document_id
+            )
             self.logger.info(
                 f"Synchronous _generate_preview_internal for doc_id {document_id} returned: {type(synchronous_preview)}"
             )
+
+            # If a dictionary is returned, it contains an s3_key, which the frontend
+            # is not equipped to handle directly. Return a placeholder and let the
+            # async polling handle fetching the S3 URL.
+            if isinstance(synchronous_preview, dict):
+                return self._generate_placeholder_preview("Generating preview...")
+
             return synchronous_preview
 
         except Exception as e:
@@ -267,6 +315,24 @@ class PreviewService:
             )
             return "fallback_to_direct_url"  # Fallback for any other outer error
 
+    def _get_real_file_type(self, file_data):
+        """Detects file type based on magic numbers."""
+        if not file_data:
+            return None
+        if file_data.startswith(b"%PDF-"):
+            return "pdf"
+        elif file_data.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "png"
+        elif file_data.startswith(b"\xff\xd8\xff"):  # Covers JPEG, JPG
+            return "jpeg"
+        elif file_data.startswith(b"GIF87a") or file_data.startswith(b"GIF89a"):
+            return "gif"
+        elif file_data.startswith(b"BM"):
+            return "bmp"
+        elif file_data.startswith(b"II*\x00") or file_data.startswith(b"MM\x00*"):
+            return "tiff"
+        return None
+
     def _generate_placeholder_preview(self, message="No preview available"):
         """Generate a placeholder image when preview generation fails"""
         try:
@@ -325,29 +391,62 @@ class PreviewService:
                 f"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}"
             )
 
-    def _generate_preview_internal(self, filename):
-        """Generate preview for a file"""
+    def _generate_preview_internal(self, filename, document_id=None):
+        """
+        Generate preview for a file.
+
+        Args:
+            filename (str): The name of the file to process.
+            document_id (int, optional): The ID of the document. Defaults to None.
+
+        Returns:
+            A string containing a data URI or a dictionary with an s3_key.
+        """
         try:
             # Get the file data from storage
             file_data = self.storage.get_file(filename)
 
             if not file_data:
                 self.logger.error(f"File not found in storage: {filename}")
+                # Check if this is a new document that hasn't been uploaded to S3 yet
+                if document_id:
+                    from src.catalog.models import Document
+
+                    doc = Document.query.get(document_id)
+                    if doc and doc.status in ["PENDING", "PROCESSING"]:
+                        return self._generate_placeholder_preview(
+                            "File is being processed"
+                        )
+
                 return self._generate_placeholder_preview(f"File not found: {filename}")
 
             # Determine file type and generate preview
+            real_file_type = self._get_real_file_type(file_data)
             ext = os.path.splitext(filename.lower())[1]
 
-            if ext in self.supported_images:
-                return self._generate_image_preview(file_data, filename)
-
-            elif ext in self.supported_pdfs:
-                # Attempt to generate an image preview for the PDF
+            # Use real file type if detected, otherwise fall back to extension
+            if real_file_type in ["png", "jpeg", "gif", "bmp", "tiff"]:
                 self.logger.info(
-                    f"File {filename} is a PDF, attempting server-side image conversion."
+                    f"Detected file type by content: {real_file_type} for {filename}"
+                )
+                return self._generate_image_preview(file_data, filename)
+            elif real_file_type == "pdf":
+                self.logger.info(
+                    f"File {filename} is a PDF (by content), attempting server-side image conversion."
                 )
                 return self._generate_pdf_preview(file_data, filename)
 
+            # Fallback to extension if content sniffing fails
+            self.logger.warning(
+                f"Could not detect file type for {filename} by content, falling back to extension '{ext}'"
+            )
+            if ext in self.supported_images:
+                return self._generate_image_preview(file_data, filename)
+            elif ext in self.supported_pdfs:
+                self.logger.info(
+                    f"File {filename} is a PDF (by extension), attempting server-side image conversion."
+                )
+                return self._generate_pdf_preview(file_data, filename)
             else:
                 return self._generate_placeholder_preview(
                     f"Unsupported file type: {ext}"

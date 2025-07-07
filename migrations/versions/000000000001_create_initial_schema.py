@@ -8,8 +8,6 @@ Create Date: 2025-05-22 17:24:00
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import TSVECTOR  # For tsvector type
-from pgvector.sqlalchemy import Vector  # For vector type
 
 # revision identifiers
 revision = "000000000001"
@@ -19,29 +17,36 @@ depends_on = None
 
 
 def upgrade():
-    # Create pgvector extension
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+    bind = op.get_bind()
+    is_postgresql = bind.dialect.name == "postgresql"
 
-    # Drop tables in reverse order of creation, if they exist, using raw SQL with CASCADE
-    op.execute("DROP TABLE IF EXISTS document_scorecards CASCADE;")
-    op.execute("DROP TABLE IF EXISTS search_feedback CASCADE;")
-    op.execute("DROP TABLE IF EXISTS dropbox_syncs CASCADE;")
-    op.execute("DROP TABLE IF EXISTS clients CASCADE;")
-    op.execute("DROP TABLE IF EXISTS llm_keywords CASCADE;")
-    op.execute(
-        "DROP TABLE IF EXISTS llm_analysis CASCADE;"
-    )  # CASCADE should handle its indexes
-    op.execute("DROP TABLE IF EXISTS keyword_synonyms CASCADE;")
-    op.execute("DROP TABLE IF EXISTS extracted_text CASCADE;")
-    op.execute("DROP TABLE IF EXISTS entities CASCADE;")
-    op.execute("DROP TABLE IF EXISTS design_elements CASCADE;")
-    op.execute("DROP TABLE IF EXISTS communication_focus CASCADE;")
-    op.execute("DROP TABLE IF EXISTS classifications CASCADE;")
-    op.execute(
-        "DROP TABLE IF EXISTS documents CASCADE;"
-    )  # CASCADE should handle its indexes
-    op.execute("DROP TABLE IF EXISTS keyword_taxonomy CASCADE;")
-    op.execute("DROP TABLE IF EXISTS batch_jobs CASCADE;")
+    if is_postgresql:
+        from sqlalchemy.dialects.postgresql import TSVECTOR
+        from pgvector.sqlalchemy import Vector
+
+        vector_type = Vector(1536)
+        tsvector_type = TSVECTOR()
+        op.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+    else:
+        vector_type = sa.Text()
+        tsvector_type = sa.Text()
+
+    # Drop tables in reverse order of creation, if they exist
+    op.execute("DROP TABLE IF EXISTS document_scorecards;")
+    op.execute("DROP TABLE IF EXISTS search_feedback;")
+    op.execute("DROP TABLE IF EXISTS dropbox_syncs;")
+    op.execute("DROP TABLE IF EXISTS clients;")
+    op.execute("DROP TABLE IF EXISTS llm_keywords;")
+    op.execute("DROP TABLE IF EXISTS llm_analysis;")
+    op.execute("DROP TABLE IF EXISTS keyword_synonyms;")
+    op.execute("DROP TABLE IF EXISTS extracted_text;")
+    op.execute("DROP TABLE IF EXISTS entities;")
+    op.execute("DROP TABLE IF EXISTS design_elements;")
+    op.execute("DROP TABLE IF EXISTS communication_focus;")
+    op.execute("DROP TABLE IF EXISTS classifications;")
+    op.execute("DROP TABLE IF EXISTS documents;")
+    op.execute("DROP TABLE IF EXISTS keyword_taxonomy;")
+    op.execute("DROP TABLE IF EXISTS batch_jobs;")
 
     # Create batch_jobs table
     op.create_table(
@@ -102,8 +107,8 @@ def upgrade():
         sa.Column("status", sa.Text(), nullable=False),
         sa.Column("batch_jobs_id", sa.Integer(), nullable=True),
         sa.Column("processing_time", sa.Float(), nullable=True),  # 'double' in DBML
-        sa.Column("search_vector", TSVECTOR(), nullable=True),
-        sa.Column("embeddings", Vector(1536), nullable=True),
+        sa.Column("search_vector", tsvector_type, nullable=True),
+        sa.Column("embeddings", vector_type, nullable=True),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_documents")),
         sa.ForeignKeyConstraint(
             ["batch_jobs_id"],
@@ -118,16 +123,17 @@ def upgrade():
         op.f("ix_documents_upload_date"), "documents", ["upload_date"], unique=False
     )
     op.create_index(op.f("ix_documents_status"), "documents", ["status"], unique=False)
-    op.create_index(
-        "ix_documents_search_vector_gin",
-        "documents",
-        ["search_vector"],
-        unique=False,
-        postgresql_using="gin",
-    )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS documents_embeddings_idx ON documents USING ivfflat (embeddings vector_cosine_ops) WITH (lists = 100);"
-    )
+    if is_postgresql:
+        op.create_index(
+            "ix_documents_search_vector_gin",
+            "documents",
+            ["search_vector"],
+            unique=False,
+            postgresql_using="gin",
+        )
+        op.execute(
+            "CREATE INDEX IF NOT EXISTS documents_embeddings_idx ON documents USING ivfflat (embeddings vector_cosine_ops) WITH (lists = 100);"
+        )
 
     # Create classifications table
     op.create_table(
@@ -264,7 +270,7 @@ def upgrade():
         sa.Column("call_to_action", sa.Text(), nullable=True),
         sa.Column("candidate_name", sa.Text(), nullable=True),
         sa.Column("opponent_name", sa.Text(), nullable=True),
-        sa.Column("search_vector", TSVECTOR(), nullable=True),
+        sa.Column("search_vector", tsvector_type, nullable=True),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_extracted_text")),
         sa.ForeignKeyConstraint(
             ["document_id"],
@@ -290,13 +296,14 @@ def upgrade():
         ["supporting_text"],
         unique=False,
     )
-    op.create_index(
-        "ix_extracted_text_search_vector_gin",
-        "extracted_text",
-        ["search_vector"],
-        unique=False,
-        postgresql_using="gin",
-    )
+    if is_postgresql:
+        op.create_index(
+            "ix_extracted_text_search_vector_gin",
+            "extracted_text",
+            ["search_vector"],
+            unique=False,
+            postgresql_using="gin",
+        )
 
     # Create keyword_synonyms table
     op.create_table(
@@ -338,8 +345,8 @@ def upgrade():
         sa.Column("confidence_score", sa.Float(), nullable=True),
         sa.Column("analysis_date", sa.TIMESTAMP(), nullable=True),
         sa.Column("model_version", sa.Text(), nullable=True),
-        sa.Column("search_vector", TSVECTOR(), nullable=True),
-        sa.Column("embeddings", Vector(1536), nullable=True),
+        sa.Column("search_vector", tsvector_type, nullable=True),
+        sa.Column("embeddings", vector_type, nullable=True),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_llm_analysis")),
         sa.ForeignKeyConstraint(
             ["document_id"],
@@ -377,16 +384,17 @@ def upgrade():
         ["summary_description"],
         unique=False,
     )
-    op.create_index(
-        "ix_llm_analysis_search_vector_gin",
-        "llm_analysis",
-        ["search_vector"],
-        unique=False,
-        postgresql_using="gin",
-    )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS llm_analysis_embeddings_idx ON llm_analysis USING ivfflat (embeddings vector_cosine_ops) WITH (lists = 100);"
-    )
+    if is_postgresql:
+        op.create_index(
+            "ix_llm_analysis_search_vector_gin",
+            "llm_analysis",
+            ["search_vector"],
+            unique=False,
+            postgresql_using="gin",
+        )
+        op.execute(
+            "CREATE INDEX IF NOT EXISTS llm_analysis_embeddings_idx ON llm_analysis USING ivfflat (embeddings vector_cosine_ops) WITH (lists = 100);"
+        )
 
     # Create llm_keywords table
     op.create_table(
@@ -518,7 +526,9 @@ def downgrade():
     op.drop_table("clients")
     op.drop_table("llm_keywords")
 
-    op.execute("DROP INDEX IF EXISTS llm_analysis_embeddings_idx;")
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        op.execute("DROP INDEX IF EXISTS llm_analysis_embeddings_idx;")
     op.drop_table("llm_analysis")
 
     op.drop_table("keyword_synonyms")
@@ -528,7 +538,8 @@ def downgrade():
     op.drop_table("communication_focus")
     op.drop_table("classifications")
 
-    op.execute("DROP INDEX IF EXISTS documents_embeddings_idx;")
+    if bind.dialect.name == "postgresql":
+        op.execute("DROP INDEX IF EXISTS documents_embeddings_idx;")
     op.drop_table("documents")
 
     op.drop_table("keyword_taxonomy")

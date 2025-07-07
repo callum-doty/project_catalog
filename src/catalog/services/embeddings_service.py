@@ -15,10 +15,61 @@ class EmbeddingsService:
         self.api_key = os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             logger.warning(
-                "OPENAI_API_KEY environment variable is not set. Vector search will not work.")
+                "OPENAI_API_KEY environment variable is not set. Vector search will not work."
+            )
 
-        self.model = "text-embedding-3-small"
-        self.embedding_dim = 1536  # Dimensions for this model
+        self.model = "text-embedding-3-large"
+        self.embedding_dim = 3072  # Dimensions for this model
+
+    def _synthesize_document_text(self, document):
+        """Synthesize a text document from various fields for embedding."""
+        synthesis_parts = []
+
+        # 1. Filename
+        if document.filename:
+            synthesis_parts.append(document.filename)
+
+        # 2. LLM Analysis Summary
+        if document.llm_analysis and document.llm_analysis.summary_description:
+            synthesis_parts.append(document.llm_analysis.summary_description)
+
+        # 3. Communication Focus
+        if document.communication_focus:
+            if document.communication_focus.primary_issue:
+                synthesis_parts.append(document.communication_focus.primary_issue)
+            if document.communication_focus.messaging_strategy:
+                synthesis_parts.append(document.communication_focus.messaging_strategy)
+
+        # 4. Document Type and Election Year from LLM Analysis
+        if document.llm_analysis:
+            if document.llm_analysis.campaign_type:
+                synthesis_parts.append(document.llm_analysis.campaign_type)
+            if document.llm_analysis.election_year:
+                synthesis_parts.append(document.llm_analysis.election_year)
+
+        # 5. Keywords
+        if document.llm_analysis and document.llm_analysis.keywords:
+            keywords = [
+                kw.keyword for kw in document.llm_analysis.keywords if kw.keyword
+            ]
+            if keywords:
+                synthesis_parts.append(", ".join(keywords))
+
+        # 6. Entities
+        if document.entity:
+            entity_parts = []
+            if document.entity.client_name:
+                entity_parts.append(f"Client: {document.entity.client_name}")
+            if document.entity.opponent_name:
+                entity_parts.append(f"Opponent: {document.entity.opponent_name}")
+            if entity_parts:
+                synthesis_parts.append(", ".join(entity_parts))
+
+        # 7. Extracted Text
+        if document.extracted_text and document.extracted_text.text_content:
+            synthesis_parts.append(document.extracted_text.text_content)
+
+        return " ".join(filter(None, synthesis_parts))
 
     async def generate_embeddings(self, text):
         """Generate embeddings for text using OpenAI API"""
@@ -34,21 +85,21 @@ class EmbeddingsService:
                     "https://api.openai.com/v1/embeddings",
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
                     },
                     json={
                         "input": text,
                         "model": self.model,
-                        "encoding_format": "float"
+                        "encoding_format": "float",
                     },
-                    timeout=30.0
+                    timeout=30.0,
                 )
 
                 response.raise_for_status()
                 data = response.json()
 
                 # Extract the embedding
-                embedding = data['data'][0]['embedding']
+                embedding = data["data"][0]["embedding"]
                 return embedding
 
         except Exception as e:
@@ -62,54 +113,26 @@ class EmbeddingsService:
             logger.error(f"Document not found: {document_id}")
             return False
 
-        # Build a richer context for embeddings
-        text_to_embed = document.filename
+        # Synthesize the document text
+        synthesized_text = self._synthesize_document_text(document)
 
-        # Add analysis text if available
-        if document.llm_analysis:
-            llm_analysis = document.llm_analysis
-            if llm_analysis.summary_description:
-                text_to_embed += " " + llm_analysis.summary_description
-
-        # Add extracted text if available
-        if hasattr(document, 'extracted_text') and document.extracted_text:
-            if document.extracted_text.text_content:
-                text_to_embed += " " + document.extracted_text.text_content
-            if document.extracted_text.main_message:
-                text_to_embed += " " + document.extracted_text.main_message
-
-        # Add keywords if available
-        if document.llm_analysis and document.llm_analysis.keywords:
-            keyword_text = " ".join(
-                [kw.keyword for kw in document.llm_analysis.keywords if hasattr(kw, 'keyword')])
-            text_to_embed += " " + keyword_text
-
-        # Generate embeddings
-        embeddings = await self.generate_embeddings(text_to_embed)
-        if not embeddings:
+        # Generate embeddings for the synthesized text
+        search_vector = await self.generate_embeddings(synthesized_text)
+        if not search_vector:
             return False
 
         try:
-            # Store embeddings in document
-            document.embeddings = embeddings
+            # Store the holistic vector in the new search_vector field
+            document.search_vector = search_vector
 
-            # If there's analysis, store embeddings there too
-            if document.llm_analysis:
-                analysis_text = document.llm_analysis.summary_description or ""
-                if document.llm_analysis.content_analysis:
-                    analysis_text += " " + document.llm_analysis.content_analysis
-
-                analysis_embeddings = await self.generate_embeddings(analysis_text)
-                if analysis_embeddings:
-                    document.llm_analysis.embeddings = analysis_embeddings
-
-            # Save to database
+            # Commit the changes to the database
             db.session.commit()
             logger.info(
-                f"Embeddings generated and stored for document {document_id}")
+                f"Holistic search vector generated and stored for document {document_id}"
+            )
             return True
         except Exception as e:
-            logger.error(f"Error storing embeddings: {str(e)}")
+            logger.error(f"Error storing search vector: {str(e)}")
             db.session.rollback()
             return False
 
@@ -128,7 +151,6 @@ class EmbeddingsService:
             "deficit": "deficit debt national_debt federal_debt borrowing budget_deficit fiscal_hole revenue_shortfall government_borrowing",
             "small business": "small_business entrepreneur startup local_business small_enterprise family_business main_street job_creator business_owner",
             "trade": "trade imports exports tariffs global_trade international_commerce NAFTA trade_deficit trade_surplus protectionism free_trade",
-
             # B. Social Issues
             "abortion": "abortion reproductive_rights pro_choice pro_life roe_v_wade planned_parenthood right_to_life women's_healthcare",
             "lgbtq": "lgbtq gay_rights transgender same_sex_marriage gender_identity sexual_orientation equality non_discrimination",
@@ -136,7 +158,6 @@ class EmbeddingsService:
             "religious freedom": "religious_freedom faith_based religion first_amendment religious_liberty religious_expression church_and_state",
             "family values": "family_values traditional_values moral_values conservative_values family_structure parental_rights",
             "marijuana": "marijuana cannabis legalization decriminalization medical_marijuana recreational_use drug_policy",
-
             # C. Healthcare
             "medicare": "medicare seniors healthcare_for_elderly retirement_benefits social_security health_insurance_for_seniors",
             "medicaid": "medicaid low_income_healthcare public_health_insurance safety_net healthcare_assistance",
@@ -144,7 +165,6 @@ class EmbeddingsService:
             "prescription drugs": "prescription_drugs medication pharmaceutical drug_prices pharmacy medication_costs medicine",
             "mental health": "mental_health behavioral_health therapy counseling psychological psychiatric depression anxiety treatment",
             "healthcare costs": "healthcare_costs medical_expenses insurance_premiums deductibles copays out_of_pocket medical_bills",
-
             # D. Public Safety & Justice
             "crime": "crime criminal law_enforcement public_safety violence criminal_justice law_and_order crime_rates",
             "guns": "guns firearms gun_control second_amendment 2A gun_rights gun_safety gun_violence weapons",
@@ -152,7 +172,6 @@ class EmbeddingsService:
             "criminal justice reform": "criminal_justice_reform sentencing incarceration prison_reform rehabilitation recidivism prison mandatory_minimums",
             "border security": "border_security border_wall immigration_enforcement border_patrol border_crisis national_security southern_border",
             "immigration": "immigration immigrants migrant immigration_policy DACA citizenship naturalization deportation asylum refugee",
-
             # E. Environment & Energy
             "climate change": "climate_change global_warming carbon_emissions greenhouse_gas environment sustainability climate_crisis",
             "renewable energy": "renewable_energy solar wind clean_energy green_energy sustainable_energy alternative_energy clean_power",
@@ -160,7 +179,6 @@ class EmbeddingsService:
             "conservation": "conservation preservation wildlife natural_resources environmental_protection land_management parks forests",
             "pollution": "pollution emissions contamination air_quality water_pollution smog industrial_waste environmental_degradation",
             "water": "water clean_water drinking_water water_quality drought water_resources water_rights lakes rivers oceans",
-
             # F. Education
             "public schools": "public_schools k12 elementary_school middle_school high_school education system district_schools",
             "college affordability": "college_affordability tuition higher_education university college_costs education_expenses financial_aid",
@@ -168,14 +186,13 @@ class EmbeddingsService:
             "school choice": "school_choice charter_schools vouchers private_schools educational_options alternative_education parental_choice",
             "teachers": "teachers educators faculty instructors school_staff teaching_profession teacher_pay teacher_benefits",
             "curriculum": "curriculum coursework education_standards common_core teaching_materials lesson_plans subject_matter education_content",
-
             # G. Government Reform
             "corruption": "corruption ethics transparency accountability integrity scandal government_reform drain_the_swamp",
             "election integrity": "election_integrity voting_security ballot_security election_security fraud_prevention secure_elections",
             "voting rights": "voting_rights voter_access ballot_access franchise democracy participation voter_suppression",
             "campaign finance": "campaign_finance political_donations fundraising dark_money super_pacs election_funding political_money",
             "term limits": "term_limits legislative_reform congressional_reform political_reform career_politicians government_reform",
-            "lobbying": "lobbying special_interests influence influence_peddling industry_advocacy corporate_influence"
+            "lobbying": "lobbying special_interests influence influence_peddling industry_advocacy corporate_influence",
         }
 
         # III. Candidate & Entity Identifiers
@@ -185,7 +202,7 @@ class EmbeddingsService:
             "republican": "republican gop grand_old_party conservative right right_leaning red_party",
             "independent": "independent non_partisan non_affiliated third_party unaffiliated",
             "opposition": "opponent rival competition adversary challenger opposing_candidate competition",
-            "endorsement": "endorsement support backing approval recommendation testimonial"
+            "endorsement": "endorsement support backing approval recommendation testimonial",
         }
 
         # IV. Communication Style & Format
@@ -195,7 +212,7 @@ class EmbeddingsService:
             "contrast": "contrast comparison difference distinction distinguish comparing contrasting",
             "attack": "attack criticism hit_piece negative offensive accusatory aggressive hostile",
             "informational": "informational educational explanatory descriptive instructive informative",
-            "mailer": "mailer mail_piece direct_mail political_mail campaign_literature flyer brochure"
+            "mailer": "mailer mail_piece direct_mail political_mail campaign_literature flyer brochure",
         }
 
         # V-VII. Additional Categories
@@ -204,7 +221,7 @@ class EmbeddingsService:
             "campaign": "campaign election candidate race messaging strategy platform advertising outreach",
             "targeting": "targeting demographic audience segment voters constituents focus directed",
             "state level": "state statewide governor legislature statehouse assembly senate district",
-            "local": "local municipal city county township borough mayor council alderman commissioner"
+            "local": "local municipal city county township borough mayor council alderman commissioner",
         }
 
         # Start with original query
@@ -214,7 +231,12 @@ class EmbeddingsService:
         added_terms = set()  # Track what we've added to avoid duplication
 
         # First check all our dictionaries for direct matches
-        for category_dict in [taxonomy_terms, entity_terms, communication_terms, additional_terms]:
+        for category_dict in [
+            taxonomy_terms,
+            entity_terms,
+            communication_terms,
+            additional_terms,
+        ]:
             for term, context in category_dict.items():
                 if term.lower() in query.lower():
                     # Don't add duplicates
@@ -232,7 +254,7 @@ class EmbeddingsService:
             "border wall": "border_barrier border_fence immigration_enforcement border_security border_protection southern_border",
             "election day": "voting_day polls ballot_casting election_date democracy_in_action civic_duty voting",
             "voter id": "voter_identification election_security ballot_integrity identity_verification voting_requirements",
-            "campaign ad": "political_advertisement campaign_commercial electoral_messaging candidate_promotion political_messaging"
+            "campaign ad": "political_advertisement campaign_commercial electoral_messaging candidate_promotion political_messaging",
         }
 
         # Check for compound terms
@@ -242,7 +264,18 @@ class EmbeddingsService:
 
         # Check for specific names of politicians
         name_indicators = [word for word in query.split() if word[0].isupper()]
-        if name_indicators and any(term in query.lower() for term in ["vote", "election", "candidate", "campaign", "senator", "representative", "governor"]):
+        if name_indicators and any(
+            term in query.lower()
+            for term in [
+                "vote",
+                "election",
+                "candidate",
+                "campaign",
+                "senator",
+                "representative",
+                "governor",
+            ]
+        ):
             enhanced_query += " politician candidate election campaign office position representative political"
 
         # Add temporal context if relevant
@@ -250,7 +283,7 @@ class EmbeddingsService:
             "recent": "recent current latest present contemporary modern up_to_date",
             "past": "past previous former historical earlier prior old",
             "future": "future upcoming planned proposed prospective forthcoming",
-            "election cycle": "election_cycle campaign_period voting_season electoral_period political_season"
+            "election cycle": "election_cycle campaign_period voting_season electoral_period political_season",
         }
 
         for term, context in temporal_terms.items():
@@ -262,7 +295,7 @@ class EmbeddingsService:
             "state": "state regional local district county municipal jurisdiction",
             "national": "national federal countrywide nationwide domestic",
             "local": "local community neighborhood district municipal county",
-            "district": "district constituency precinct ward division electoral_area"
+            "district": "district constituency precinct ward division electoral_area",
         }
 
         for term, context in geographic_terms.items():
@@ -274,7 +307,7 @@ class EmbeddingsService:
             "mailer": "mailer direct_mail campaign_literature political_mail flyer brochure",
             "ad": "advertisement commercial spot announcement promotion marketing",
             "email": "email message correspondence communication electronic_mail",
-            "social media": "social_media post tweet status_update social_network"
+            "social media": "social_media post tweet status_update social_network",
         }
 
         for doc_type, context in document_types.items():
@@ -285,7 +318,7 @@ class EmbeddingsService:
         sentiment_terms = {
             "positive": "positive favorable supportive approving optimistic hopeful",
             "negative": "negative critical opposing disapproving pessimistic unfavorable",
-            "neutral": "neutral objective impartial balanced unbiased factual"
+            "neutral": "neutral objective impartial balanced unbiased factual",
         }
 
         for sentiment, context in sentiment_terms.items():
@@ -297,7 +330,7 @@ class EmbeddingsService:
             "attack": "attack criticism negative opposition contrast comparison",
             "defense": "defense response rebuttal counterargument explanation justification",
             "promotion": "promotion positive support endorsement advocacy recommendation",
-            "contrast": "contrast comparison difference distinction opposing alternative"
+            "contrast": "contrast comparison difference distinction opposing alternative",
         }
 
         for strategy, context in strategy_terms.items():
@@ -306,8 +339,7 @@ class EmbeddingsService:
 
         # Log the enhancement for debugging
         if enhanced_query != query.lower():
-            logger.info(
-                f"Enhanced query '{query}' with taxonomy-specific terms")
+            logger.info(f"Enhanced query '{query}' with taxonomy-specific terms")
             logger.debug(f"Original: '{query}' → Enhanced: '{enhanced_query}'")
 
         return await self.generate_embeddings(enhanced_query)

@@ -320,93 +320,46 @@ class SearchService:
 
     def perform_vector_search(self, query: str):
         """
-        Perform vector-based semantic search with pgvector
+        Perform vector-based semantic search with pgvector using the holistic search_vector.
         """
         try:
             # Check if vector search is available
-            if not hasattr(Document, "embeddings"):
+            if not hasattr(Document, "search_vector"):
                 self.logger.warning(
-                    "Vector search not available - Document model doesn't have embeddings attribute"
+                    "Vector search not available - Document model doesn't have search_vector attribute"
                 )
                 return self.perform_keyword_search(query, set([query]))
 
-            # Run the async function to get query embeddings - changes needed here
+            # Run the async function to get query embeddings
             import asyncio
 
-            # Create a new event loop for each request to avoid issues
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-
             try:
-                # Get embeddings and ensure we have a result, not a coroutine
                 query_embeddings = loop.run_until_complete(
                     self.embeddings_service.generate_query_embeddings(query)
                 )
             finally:
-                # Always close the loop
                 loop.close()
 
             if not query_embeddings:
-                # Fall back to keyword search if embeddings generation fails
                 self.logger.warning(
                     "Vector embeddings generation failed, falling back to keyword search"
                 )
                 return self.perform_keyword_search(query, set([query]))
 
-            # Use a lower threshold to catch more semantic relationships
             similarity_threshold = DEFAULTS["VECTOR_SIMILARITY_THRESHOLD"]
 
-            # Use cosine similarity with pgvector
-            # Find documents with similar embeddings using pgvector's <=> operator for cosine distance
-            doc_matches = (
-                db.session.query(
-                    Document.id,
-                    (1 - (Document.embeddings.op("<=>")(query_embeddings))).label(
-                        "similarity"
-                    ),
-                )
-                .filter(Document.embeddings.is_not(None))
-                .filter(
-                    (1 - (Document.embeddings.op("<=>")(query_embeddings)))
-                    > similarity_threshold
-                )
-                .subquery()
-            )
-
-            # Find analysis content with similar embeddings
-            analysis_matches = (
-                db.session.query(
-                    LLMAnalysis.document_id,
-                    (1 - (LLMAnalysis.embeddings.op("<=>")(query_embeddings))).label(
-                        "similarity"
-                    ),
-                )
-                .filter(LLMAnalysis.embeddings.is_not(None))
-                .filter(
-                    (1 - (LLMAnalysis.embeddings.op("<=>")(query_embeddings)))
-                    > similarity_threshold
-                )
-                .subquery()
-            )
-
-            # Combine the results and order by similarity score
+            # Use cosine similarity with pgvector on the new search_vector
             combined_query = (
                 db.session.query(Document.id)
-                .outerjoin(doc_matches, Document.id == doc_matches.c.id)
-                .outerjoin(
-                    analysis_matches, Document.id == analysis_matches.c.document_id
-                )
+                .filter(Document.search_vector.is_not(None))
                 .filter(
-                    or_(
-                        doc_matches.c.id.is_not(None),
-                        analysis_matches.c.document_id.is_not(None),
-                    )
+                    (1 - (Document.search_vector.op("<=>")(query_embeddings)))
+                    > similarity_threshold
                 )
                 .order_by(
-                    (
-                        func.coalesce(doc_matches.c.similarity, 0)
-                        + func.coalesce(analysis_matches.c.similarity, 0)
-                    ).desc()
+                    (1 - (Document.search_vector.op("<=>")(query_embeddings))).desc()
                 )
             )
 
@@ -521,157 +474,60 @@ class SearchService:
         self, selected_primary=None, selected_subcategory=None, selected_term=None
     ):
         """
-        Generate taxonomy facets for sidebar filtering with terms using LLMKeywords
+        Generate a hierarchical taxonomy structure for sidebar filtering.
         """
         try:
-            # Query for primary categories through LLMKeyword relationship
-            primary_categories = (
+            # Fetch all taxonomy terms at once
+            all_terms = (
                 db.session.query(
                     KeywordTaxonomy.primary_category,
-                    func.count(LLMKeyword.id.distinct()).label("count"),
+                    KeywordTaxonomy.subcategory,
+                    KeywordTaxonomy.term,
                 )
-                .join(LLMKeyword, KeywordTaxonomy.id == LLMKeyword.taxonomy_id)
-                .group_by(KeywordTaxonomy.primary_category)
-                .filter(
-                    KeywordTaxonomy.primary_category.isnot(
-                        None
-                    )  # Ensure non-null values
-                )
-                .order_by(KeywordTaxonomy.primary_category)
+                .distinct()
                 .all()
             )
 
-            # Log for debugging
-            self.logger.info(
-                f"Found {len(primary_categories)} primary categories from LLMKeywords"
-            )
+            # Build the hierarchical structure
+            taxonomy_tree = {}
+            for primary, sub, term in all_terms:
+                if not primary:
+                    continue
+                if primary not in taxonomy_tree:
+                    taxonomy_tree[primary] = {
+                        "subcategories": {},
+                        "count": 0,
+                        "selected": primary == selected_primary,
+                    }
 
-            # If no results, try direct query on KeywordTaxonomy without joins
-            if not primary_categories:
-                self.logger.warning(
-                    "No primary categories found with LLMKeyword join, trying direct query"
-                )
-                primary_categories = (
-                    db.session.query(
-                        KeywordTaxonomy.primary_category,
-                        func.count(KeywordTaxonomy.id).label("count"),
-                    )
-                    .filter(KeywordTaxonomy.primary_category.isnot(None))
-                    .group_by(KeywordTaxonomy.primary_category)
-                    .order_by(KeywordTaxonomy.primary_category)
-                    .all()
-                )
+                if not sub:
+                    continue
+                if sub not in taxonomy_tree[primary]["subcategories"]:
+                    taxonomy_tree[primary]["subcategories"][sub] = {
+                        "terms": [],
+                        "count": 0,
+                        "selected": primary == selected_primary
+                        and sub == selected_subcategory,
+                    }
 
-                self.logger.info(
-                    f"Direct query found {len(primary_categories)} primary categories"
-                )
-
-            # Get subcategories if primary category selected
-            subcategories_data = []
-            if selected_primary:
-                # Get all distinct subcategories defined under the selected primary category
-                defined_subcategories = (
-                    db.session.query(KeywordTaxonomy.subcategory)
-                    .filter(
-                        KeywordTaxonomy.primary_category == selected_primary,
-                        KeywordTaxonomy.subcategory.isnot(None),
-                    )
-                    .distinct()
-                    .order_by(KeywordTaxonomy.subcategory)
-                    .all()
+                if not term:
+                    continue
+                taxonomy_tree[primary]["subcategories"][sub]["terms"].append(
+                    {
+                        "name": term,
+                        "count": 0,
+                        "selected": primary == selected_primary
+                        and sub == selected_subcategory
+                        and term == selected_term,
+                    }
                 )
 
-                for subcat_tuple in defined_subcategories:
-                    subcat_name = subcat_tuple[0]
-                    if not subcat_name:  # Skip if subcategory name is None or empty
-                        continue
-                    # Count documents linked to this primary_category and subcategory via LLMKeyword
-                    count = (
-                        db.session.query(func.count(LLMAnalysis.document_id.distinct()))
-                        .select_from(LLMKeyword)
-                        .join(LLMAnalysis, LLMKeyword.llm_analysis_id == LLMAnalysis.id)
-                        .join(
-                            KeywordTaxonomy,
-                            LLMKeyword.taxonomy_id == KeywordTaxonomy.id,
-                        )
-                        .filter(
-                            KeywordTaxonomy.primary_category == selected_primary,
-                            KeywordTaxonomy.subcategory == subcat_name,
-                        )
-                        .scalar()
-                        or 0
-                    )  # Ensure count is 0 if scalar() returns None
-                    subcategories_data.append(
-                        {
-                            "name": subcat_name,
-                            "count": count,
-                            "selected": subcat_name == selected_subcategory,
-                        }
-                    )
-
-            # Get terms if both primary and subcategory selected
-            terms_data = []
-            if selected_primary and selected_subcategory:
-                # Get all distinct terms defined under the selected primary and subcategory
-                defined_terms = (
-                    db.session.query(KeywordTaxonomy.term)
-                    .filter(
-                        KeywordTaxonomy.primary_category == selected_primary,
-                        KeywordTaxonomy.subcategory == selected_subcategory,
-                        KeywordTaxonomy.term.isnot(None),
-                    )
-                    .distinct()
-                    .order_by(KeywordTaxonomy.term)
-                    .all()
-                )
-
-                for term_tuple in defined_terms:
-                    term_name = term_tuple[0]
-                    if not term_name:  # Skip if term name is None or empty
-                        continue
-                    # Count documents linked to this primary_category, subcategory, and term via LLMKeyword
-                    count = (
-                        db.session.query(func.count(LLMAnalysis.document_id.distinct()))
-                        .select_from(LLMKeyword)
-                        .join(LLMAnalysis, LLMKeyword.llm_analysis_id == LLMAnalysis.id)
-                        .join(
-                            KeywordTaxonomy,
-                            LLMKeyword.taxonomy_id == KeywordTaxonomy.id,
-                        )
-                        .filter(
-                            KeywordTaxonomy.primary_category == selected_primary,
-                            KeywordTaxonomy.subcategory == selected_subcategory,
-                            KeywordTaxonomy.term == term_name,
-                        )
-                        .scalar()
-                        or 0
-                    )  # Ensure count is 0 if scalar() returns None
-                    terms_data.append(
-                        {
-                            "name": term_name,
-                            "count": count,
-                            "selected": term_name == selected_term,
-                        }
-                    )
-
-            # Format results
-            result = {
-                "primary_categories": [
-                    {"name": cat, "count": count, "selected": cat == selected_primary}
-                    for cat, count in primary_categories
-                    if cat  # Skip empty categories
-                ],
-                "subcategories": subcategories_data,
-                "terms": terms_data,
-            }
-
-            return result
+            return taxonomy_tree
         except Exception as e:
             self.logger.error(
                 f"Error generating taxonomy facets: {str(e)}", exc_info=True
             )
-            # Return empty but properly structured result on error
-            return {"primary_categories": [], "subcategories": [], "terms": []}
+            return {}
 
     def _apply_filters(self, query, **filters):
         """
@@ -818,7 +674,9 @@ class SearchService:
         documents = (
             Document.query.filter(Document.id.in_(document_ids))
             .options(
-                joinedload(Document.llm_analysis).joinedload(LLMAnalysis.keywords),
+                joinedload(Document.llm_analysis)
+                .joinedload(LLMAnalysis.keywords)
+                .joinedload(LLMKeyword.taxonomy_term),
                 joinedload(Document.entity),
                 joinedload(Document.design_elements),
                 joinedload(Document.communication_focus),
@@ -856,6 +714,7 @@ class SearchService:
                     "upload_date": doc.upload_date.strftime("%Y-%m-%d %H:%M:%S"),
                     "status": doc.status,
                     "preview": preview,
+                    "search_vector": doc.search_vector,  # Include search_vector for embedding status
                     # LLM Analysis data
                     "summary": (
                         doc.llm_analysis.summary_description
@@ -912,24 +771,10 @@ class SearchService:
                         if hasattr(doc, "extracted_text") and doc.extracted_text
                         else ""
                     ),
-                    # Hierarchical keywords - format LLMKeywords
-                    "hierarchical_keywords": [
-                        {
-                            "term": kw.keyword,
-                            "primary_category": kw.category,
-                            "subcategory": "",  # LLMKeyword doesn't have subcategory
-                            "relevance_score": (
-                                kw.relevance_score / 100 if kw.relevance_score else 0
-                            ),
-                        }
-                        for kw in (
-                            doc.llm_analysis.keywords
-                            if hasattr(doc, "llm_analysis")
-                            and doc.llm_analysis
-                            and hasattr(doc.llm_analysis, "keywords")
-                            else []
-                        )
-                    ],
+                    # Hierarchical keywords - get from taxonomy relationship
+                    "hierarchical_keywords": self._get_document_hierarchical_keywords(
+                        doc
+                    ),
                 }
 
                 # Log the hierarchical keywords for debugging
@@ -1143,6 +988,28 @@ class SearchService:
             "parent_id": term.parent_id,
             "synonyms": [s.synonym for s in term.synonyms] if term.synonyms else [],
         }
+
+    def _get_document_hierarchical_keywords(self, doc):
+        """
+        Get hierarchical keywords for a single document with proper taxonomy data
+
+        Args:
+            doc: Document object with loaded relationships
+
+        Returns:
+            List of hierarchical keyword dictionaries
+        """
+        try:
+            # Use the DocumentKeywordManager for consistent keyword retrieval
+            from src.catalog.services.keyword_manager import DocumentKeywordManager
+
+            keywords = DocumentKeywordManager.get_document_keywords(doc.id)
+            return keywords
+        except Exception as e:
+            self.logger.error(
+                f"Error getting hierarchical keywords for document {doc.id}: {str(e)}"
+            )
+            return []
 
     def record_search_feedback(self, data):
         """

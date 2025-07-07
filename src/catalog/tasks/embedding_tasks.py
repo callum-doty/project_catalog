@@ -1,4 +1,3 @@
-
 from .celery_app import celery_app, logger
 from src.catalog.models import Document
 from src.catalog import db
@@ -6,13 +5,7 @@ import asyncio
 import os
 
 
-if 'FLASK_ENV' in os.environ and os.environ['FLASK_ENV'] == 'development':
-    os.environ['REDIS_URL'] = 'redis://localhost:6379/0'
-    os.environ['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
-    os.environ['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
-
-
-@celery_app.task(name='tasks.generate_embeddings')
+@celery_app.task(name="tasks.generate_embeddings")
 def generate_embeddings(document_id=None):
     """Generate embeddings for documents"""
     from src.catalog import create_app
@@ -33,27 +26,28 @@ def generate_embeddings(document_id=None):
             logger.info(f"Generating embeddings for document {document_id}")
             success = loop.run_until_complete(
                 embeddings_service.generate_and_store_embeddings_for_document(
-                    document_id)
+                    document_id
+                )
             )
             result = {document_id: "success" if success else "failed"}
         else:
             # Process all documents without embeddings
-            documents = Document.query.filter(
-                Document.embeddings.is_(None)).all()
-            logger.info(
-                f"Generating embeddings for {len(documents)} documents")
+            documents = Document.query.filter(Document.search_vector.is_(None)).all()
+            logger.info(f"Generating embeddings for {len(documents)} documents")
 
             result = {}
             for doc in documents:
                 try:
                     success = loop.run_until_complete(
                         embeddings_service.generate_and_store_embeddings_for_document(
-                            doc.id)
+                            doc.id
+                        )
                     )
                     result[doc.id] = "success" if success else "failed"
                 except Exception as e:
                     logger.error(
-                        f"Error generating embeddings for document {doc.id}: {str(e)}")
+                        f"Error generating embeddings for document {doc.id}: {str(e)}"
+                    )
                     result[doc.id] = "error"
 
         loop.close()

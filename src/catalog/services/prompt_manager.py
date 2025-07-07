@@ -1,6 +1,8 @@
 # app/services/prompt_manager.py
 import os
+import json
 from datetime import datetime
+from catalog.services.taxonomy_service import TaxonomyService
 
 
 class PromptManager:
@@ -17,43 +19,81 @@ Provide accurate, objective analysis in the exact JSON format requested."""
 
         # Different capabilities based on model
         if "claude-3-opus" in model:
-            return {
-                "vision": True,
-                "structure": "high",
-                "detail": "high"
-            }
+            return {"vision": True, "structure": "high", "detail": "high"}
         elif "claude-3-sonnet" in model:
-            return {
-                "vision": True,
-                "structure": "medium",
-                "detail": "medium"
-            }
+            return {"vision": True, "structure": "medium", "detail": "medium"}
         else:
-            return {
-                "vision": True,
-                "structure": "basic",
-                "detail": "basic"
-            }
+            return {"vision": True, "structure": "basic", "detail": "basic"}
 
-    def get_core_metadata_prompt(self, filename):
-        """Generate a prompt for basic document metadata analysis"""
+    def get_unified_analysis_prompt(self, filename):
+        """
+        A single, robust prompt that uses chain-of-thought to improve accuracy
+        and combines metadata and classification.
+        """
         return {
             "system": self.base_system_prompt,
-            "user": f"""Analyze the document '{filename}' and provide ONLY the following core metadata in JSON format:
+            "user": f"""
+Analyze the document '{filename}' by following these steps precisely.
 
+**Step 1: Initial Analysis & Evidence Gathering**
+First, write down your reasoning and cite direct evidence from the document.
+- **Summary:** What is the document's core message?
+- **Document Type Evidence:** What visual or text clues indicate the type of document? (e.g., "Contains a mailing address panel", "Formatted as a poster").
+- **Election Year Evidence:** Is there a date or a phrase like 'Vote on November 5th'? Cite it.
+- **Tone Evidence:** Quote words or phrases that establish the tone (e.g., 'failed leader', 'brighter future').
+- **Category Evidence:** What is the main goal? Is it asking for a vote (GOTV), criticizing an opponent (attack), or something else?
+
+**Step 2: JSON Output Generation**
+Now, based ONLY on your reasoning in Step 1, provide the final analysis in the exact JSON format below.
+- If you cannot find evidence for a field in Step 1, its value in the JSON MUST be null.
+- For fields with a specific list of choices, you MUST use one of the provided options.
+
+```json
 {{
   "document_analysis": {{
-    "summary": "Clear 1-2 sentence overview of the document",
-    "confidence_score": <float between 0.0 and 1.0>,
-    "document_type": "mailer/digital/handout/poster/etc.",
-    "campaign_type": "primary/general/special/runoff",
-    "election_year": "Specify the exact year if identifiable",
-    "document_tone": "positive/negative/neutral/informational"
+    "summary": "Clear 1-2 sentence overview of the document's purpose.",
+    "document_type": "Choose ONLY from: ['mailer', 'digital ad', 'handout', 'poster', 'letter', 'brochure']",
+    "campaign_type": "Choose ONLY from: ['primary', 'general', 'special', 'runoff']",
+    "election_year": "The four-digit election year (e.g., 2024). MUST be null if not found.",
+    "document_tone": "Choose ONLY from: ['positive', 'negative', 'neutral', 'informational', 'contrast']"
+  }},
+  "classification": {{
+    "category": "Choose ONLY from: ['GOTV', 'attack', 'comparison', 'endorsement', 'issue', 'biographical']",
+    "subcategory": "A specific, one-to-three word description of the narrower topic (e.g., 'Taxes', 'Healthcare Policy'). MUST be null if not applicable.",
+    "rationale": "Briefly reference the evidence from Step 1 that justifies the category choice."
+  }},
+  "entities": {{
+    "client_name": "Full name of the client/candidate. If not mentioned, this value MUST be null.",
+    "opponent_name": "Full name of any opponent mentioned. If no opponent is mentioned, this value MUST be null.",
+    "creation_date": "The creation or print date shown on the document (YYYY-MM-DD format). If no date is visible, this value MUST be null."
   }}
 }}
 
-Focus ONLY on these core metadata elements. Your response MUST be valid JSON.
-"""
+Your response MUST be valid JSON formatted exactly as requested above.
+""",
+        }
+
+    def get_core_metadata_prompt(self, filename):
+        """Generate a prompt for core metadata extraction"""
+        return {
+            "system": self.base_system_prompt,
+            "user": f"""
+Analyze the document '{filename}' and extract only the core metadata.
+
+Return ONLY the following JSON. If a value is not found, it MUST be null.
+
+{{
+  "document_analysis": {{
+    "summary": "Clear 1-2 sentence overview of the document's purpose.",
+    "document_type": "Choose ONLY from: ['mailer', 'digital ad', 'handout', 'poster', 'letter', 'brochure']",
+    "campaign_type": "Choose ONLY from: ['primary', 'general', 'special', 'runoff']",
+    "election_year": "The four-digit election year (e.g., 2024). MUST be null if not found.",
+    "document_tone": "Choose ONLY from: ['positive', 'negative', 'neutral', 'informational', 'contrast']"
+  }}
+}}
+
+Your response MUST be valid JSON formatted exactly as requested above.
+""",
         }
 
     def get_classification_prompt(self, filename, metadata=None):
@@ -66,21 +106,20 @@ from {metadata.get('election_year', '')} that appears to be {metadata.get('docum
 
         return {
             "system": self.base_system_prompt,
-            "user": f"""{context}Analyze the document '{filename}' and determine its primary category and purpose.
+            "user": f"""{context}Analyze the document '{filename}' and classify it.
 
-Return ONLY the following JSON:
+Return ONLY the following JSON. If a value is not found, it MUST be null.
 
 {{
   "classification": {{
-    "category": "GOTV/attack/comparison/endorsement/issue/biographical",
-    "subcategory": "specific issue or narrower category",
-    "confidence": <float between 0.0 and 1.0>,
-    "rationale": "Brief explanation of classification"
+    "category": "Choose ONLY from: ['GOTV', 'attack', 'comparison', 'endorsement', 'issue', 'biographical']",
+    "subcategory": "A specific, one-to-three word description of the narrower topic (e.g., 'Taxes', 'Healthcare Policy'). MUST be null if not applicable.",
+    "rationale": "Briefly justify the category choice."
   }}
 }}
 
 Your response MUST be valid JSON formatted exactly as requested above.
-"""
+""",
         }
 
     def get_entity_prompt(self, filename, metadata=None):
@@ -95,21 +134,20 @@ from {metadata.get('election_year', '')} that appears to be {metadata.get('docum
             "system": self.base_system_prompt,
             "user": f"""{context}Analyze the document '{filename}' and extract entity information.
 
-Return ONLY the following JSON:
+Return ONLY the following JSON. If a value is not found, it MUST be null.
 
 {{
   "entities": {{
-    "client_name": "full name of the client/candidate",
-    "opponent_name": "full name of any opponent mentioned, if applicable",
-    "creation_date": "date created or date shown on document if available",
-    "survey_question": "any survey questions shown, if applicable",
-    "file_identifier": "any naming convention or identifier visible in the document",
-    "confidence": <float between 0.0 and 1.0>
+    "client_name": "Full name of the client/candidate. If not mentioned, this value MUST be null.",
+    "opponent_name": "Full name of any opponent mentioned. If no opponent is mentioned, this value MUST be null.",
+    "creation_date": "The creation or print date shown on the document (YYYY-MM-DD format). If no date is visible, this value MUST be null.",
+    "survey_question": "Any survey questions shown. If not applicable, this value MUST be null.",
+    "file_identifier": "Any naming convention or identifier visible in the document. If not applicable, this value MUST be null."
   }}
 }}
 
 Your response MUST be valid JSON formatted exactly as requested above.
-"""
+""",
         }
 
     def get_text_extraction_prompt(self, filename, metadata=None):
@@ -124,21 +162,18 @@ from {metadata.get('election_year', '')}.
             "system": self.base_system_prompt,
             "user": f"""{context}Analyze the document '{filename}' and extract the text content.
 
-Return ONLY the following JSON:
+Return ONLY the following JSON. If a value is not found, it MUST be null.
 
 {{
   "extracted_text": {{
-    "main_message": "primary headline/slogan as a single string",
-    "supporting_text": "secondary messages as a single string",
-    "call_to_action": "specific voter instruction if present (e.g., 'Vote on Nov 8')",
-    "candidate_name": "full name of the primary candidate",
-    "opponent_name": "full name of any opponent mentioned, if applicable",
-    "confidence": <float between 0.0 and 1.0>
+    "main_message": "Primary headline/slogan as a single string. MUST be null if not found.",
+    "supporting_text": "Secondary messages as a single string. MUST be null if not found.",
+    "call_to_action": "Specific voter instruction if present (e.g., 'Vote on Nov 8'). MUST be null if not found."
   }}
 }}
 
 Your response MUST be valid JSON formatted exactly as requested above.
-"""
+""",
         }
 
     def get_design_elements_prompt(self, filename, metadata=None):
@@ -153,23 +188,22 @@ from {metadata.get('election_year', '')}.
             "system": self.base_system_prompt,
             "user": f"""{context}Analyze the visual design elements in the document '{filename}'.
 
-Return ONLY the following JSON:
+Return ONLY the following JSON. If a value is not found, it MUST be null.
 
 {{
   "design_elements": {{
-    "color_scheme": ["primary color", "secondary color", "accent color"],
-    "theme": "patriotic/conservative/progressive/etc.",
-    "mail_piece_type": "postcard/letter/brochure/door hanger/etc.",
-    "geographic_location": "City, State or State only",
-    "target_audience": "specific demographic focus (republicans, democrats, veterans, etc.)",
-    "campaign_name": "candidate and position sought (e.g., 'Smith for Senate')",
-    "visual_elements": ["flag", "candidate photo", "family", "etc."],
-    "confidence": <float between 0.0 and 1.0>
+    "color_scheme": "List of up to three primary colors (e.g., ['#FF0000', '#0000FF', '#FFFFFF']). MUST be null if not applicable.",
+    "theme": "Choose ONLY from: ['patriotic', 'conservative', 'progressive', 'modern', 'traditional', 'corporate']. MUST be null if not applicable.",
+    "mail_piece_type": "Choose ONLY from: ['postcard', 'letter', 'brochure', 'door hanger', 'digital ad', 'poster']. MUST be null if not applicable.",
+    "geographic_location": "City, State or State only. MUST be null if not found.",
+    "target_audience": "Specific demographic focus (e.g., 'republicans', 'democrats', 'veterans'). MUST be null if not applicable.",
+    "campaign_name": "Candidate and position sought (e.g., 'Smith for Senate'). MUST be null if not applicable.",
+    "visual_elements": "List of key visual elements (e.g., ['flag', 'candidate photo', 'family']). MUST be null if not applicable."
   }}
 }}
 
 Your response MUST be valid JSON formatted exactly as requested above.
-"""
+""",
         }
 
     def get_taxonomy_keyword_prompt(self, filename, metadata=None):
@@ -180,63 +214,47 @@ Your response MUST be valid JSON formatted exactly as requested above.
 from {metadata.get('election_year', '')} that appears to be {metadata.get('document_tone', '')}.
 """
 
-        taxonomy_guidelines = """
-Primary taxonomy categories and examples:
-1. Policy Issues & Topics:
-   - Economy & Taxes: taxes, inflation, jobs, wages, budget, deficit, trade
-   - Social Issues: abortion, LGBTQ+ rights, marriage equality, religious freedom
-   - Healthcare: Medicare, Medicaid, Obamacare, prescription drugs
-   - Public Safety: crime, guns, police, immigration, border security
-   - Environment: climate change, renewable energy, fossil fuels, conservation
-   - Education: schools, college affordability, student loans, teachers
-   - Government Reform: corruption, election integrity, voting rights, term limits
-
-2. Candidate & Entity:
-   - Candidate Elements: name, party, previous/current office, biography
-   - Political Parties: Democratic, Republican, Independent, Progressive
-   - Opposition Elements: opponent name, criticism, contrast points
-   - External Endorsements: organizations, leaders, unions, celebrities
-
-3. Communication Style:
-   - Message Tone: positive, negative, contrast, attack, informational
-   - Mail Piece Types: postcard, mailer, brochure, letter, push card
-   - Message Focus: introduction, issue-based, biography, endorsement, GOTV
-   - Visual Design: color scheme, photography, graphics, typography, layout
-
-4. Geographic & Demographic:
-   - Geographic Level: national, statewide, congressional, county, city
-   - Target Audience: age group, gender, race/ethnicity, education, income
-
-5. Campaign Context:
-   - Election Type: general, primary, special, runoff, recall
-   - Election Year: 2024, 2022, 2020, etc.
-   - Office Sought: presidential, senate, house, governor, state, local
-   - Campaign Phase: early campaign, late campaign, GOTV period
-"""
+        canonical_taxonomy_structure = TaxonomyService.get_taxonomy_for_prompt()
+        taxonomy_for_prompt = json.dumps(canonical_taxonomy_structure, indent=2)
 
         return {
             "system": self.base_system_prompt,
-            "user": f"""{context}Analyze the document '{filename}' and identify relevant keywords using the hierarchical taxonomy system.
+            "user": f"""
+Analyze the document '{filename}' and perform the following two steps:
 
-{taxonomy_guidelines}
+**Step 1: Extract Verbatim Keyphrases**
+Identify 10-15 of the most important and specific keywords or keyphrases mentioned in the document. These should be the exact phrases used.
 
-Return ONLY the following JSON:
+**Step 2: Map to Canonical Taxonomy**
+For each verbatim keyphrase you extracted, map it to the single most relevant canonical term from the official taxonomy provided below.
 
+**Official Canonical Taxonomy:**
+```json
+{taxonomy_for_prompt}
+```
+
+**Step 3: Generate JSON Output**
+Provide your response ONLY in the following JSON format. For each verbatim term, provide its mapping to a primary category, subcategory, and the specific canonical term.
+
+```json
 {{
-  "hierarchical_keywords": [
+  "keyword_mappings": [
     {{
-      "specific_term": "specific term used in document (e.g., 'abortion', 'taxes', 'corruption')",
-      "primary_category": "Choose from: Policy Issues & Topics | Candidate & Entity | Communication Style | Geographic & Demographic | Campaign Context",
-      "subcategory": "appropriate subcategory from the taxonomy matching the primary_category",
-      "synonyms": ["any", "synonyms", "or", "related", "terms"],
-      "relevance_score": <float between 0.0 and 1.0>
+      "verbatim_term": "The exact phrase from the document, e.g., 'universal background checks'",
+      "mapped_primary_category": "The primary category from the official taxonomy, e.g., 'Public Safety & Justice'",
+      "mapped_subcategory": "The subcategory from the official taxonomy, e.g., 'Public Safety & Justice'",
+      "mapped_canonical_term": "The canonical term from the official taxonomy, e.g., 'Guns'"
     }},
-    ... provide 10-15 hierarchical keywords total, ordered by relevance_score (highest first)
+    {{
+      "verbatim_term": "The exact phrase from the document, e.g., 'a 15% flat tax'",
+      "mapped_primary_category": "Economy & Taxes",
+      "mapped_subcategory": "Economy & Taxes",
+      "mapped_canonical_term": "Taxes"
+    }}
   ]
 }}
-
-Your response MUST be valid JSON formatted exactly as requested above.
-"""
+```
+""",
         }
 
     def get_communication_focus_prompt(self, filename, metadata=None):
@@ -251,18 +269,17 @@ from {metadata.get('election_year', '')} that appears to be {metadata.get('docum
             "system": self.base_system_prompt,
             "user": f"""{context}Analyze the document '{filename}' and determine its primary communication focus and strategy.
 
-Return ONLY the following JSON:
+Return ONLY the following JSON. If a value is not found, it MUST be null.
 
 {{
   "communication_focus": {{
-    "primary_issue": "the main policy issue or focus of the communication",
-    "secondary_issues": ["list", "of", "other", "issues", "mentioned"],
-    "messaging_strategy": "attack/positive/comparison/etc.",
-    "audience_persuasion": "describe how the document attempts to persuade its audience",
-    "confidence": <float between 0.0 and 1.0>
+    "primary_issue": "The main policy issue or focus of the communication. MUST be null if not applicable.",
+    "secondary_issues": "List of other issues mentioned. MUST be null if not applicable.",
+    "messaging_strategy": "Choose ONLY from: ['attack', 'positive', 'comparison', 'biographical', 'endorsement', 'GOTV', 'informational']",
+    "audience_persuasion": "Describe how the document attempts to persuade its audience. MUST be null if not applicable."
   }}
 }}
 
 Your response MUST be valid JSON formatted exactly as requested above.
-"""
+""",
         }

@@ -24,11 +24,9 @@ from src.catalog.models import (
     LLMAnalysis,
     LLMKeyword,
     Classification,
-    DesignElement,
     ExtractedText,
     DropboxSync,
     Entity,
-    CommunicationFocus,
 )
 from src.catalog.models import KeywordTaxonomy, KeywordSynonym
 from sqlalchemy import or_, func, desc, case, extract
@@ -819,34 +817,10 @@ def preview_status(filename):
 def get_document_hierarchical_keywords_bulk(document_ids):
     """Efficiently get hierarchical keywords for multiple documents at once"""
     try:
-        keywords_data = (
-            db.session.query(
-                LLMKeyword.document_id,
-                KeywordTaxonomy.id,
-                KeywordTaxonomy.term,
-                KeywordTaxonomy.primary_category,
-                KeywordTaxonomy.subcategory,
-                LLMKeyword.relevance_score,
-            )
-            .join(KeywordTaxonomy, LLMKeyword.taxonomy_id == KeywordTaxonomy.id)
-            .filter(LLMKeyword.document_id.in_(document_ids))
-            .all()
-        )
+        # Use the DocumentKeywordManager for consistent keyword retrieval
+        from src.catalog.services.keyword_manager import DocumentKeywordManager
 
-        results = {doc_id: [] for doc_id in document_ids}
-
-        for doc_id, tax_id, term, primary_cat, subcat, score in keywords_data:
-            results[doc_id].append(
-                {
-                    "id": tax_id,
-                    "term": term,
-                    "primary_category": primary_cat,
-                    "subcategory": subcat,
-                    "relevance_score": score,
-                }
-            )
-
-        return results
+        return DocumentKeywordManager.get_bulk_document_keywords(document_ids)
     except Exception as e:
         current_app.logger.error(f"Error getting hierarchical keywords: {str(e)}")
         return {doc_id: [] for doc_id in document_ids}
