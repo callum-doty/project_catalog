@@ -214,22 +214,8 @@ Your response MUST be valid JSON formatted exactly as requested above.
 from {metadata.get('election_year', '')} that appears to be {metadata.get('document_tone', '')}.
 """
 
-        try:
-            taxonomy_service = TaxonomyService()
-            # Note: This should be called from an async context, but for now we'll use a synchronous approach
-            import asyncio
-
-            try:
-                canonical_taxonomy_structure = asyncio.run(
-                    taxonomy_service.get_taxonomy_for_ai_prompt()
-                )
-            except:
-                # Fallback to synchronous method if available
-                canonical_taxonomy_structure = {}
-            taxonomy_for_prompt = json.dumps(canonical_taxonomy_structure, indent=2)
-        except Exception as e:
-            # Fallback if taxonomy service fails
-            taxonomy_for_prompt = "{}"
+        canonical_taxonomy_structure = TaxonomyService.get_taxonomy_for_prompt()
+        taxonomy_for_prompt = json.dumps(canonical_taxonomy_structure, indent=2)
 
         return {
             "system": self.base_system_prompt,

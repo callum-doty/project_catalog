@@ -50,19 +50,9 @@ class AIService:
 
         if settings.anthropic_api_key:
             try:
-                # Try different initialization approaches for Anthropic
-                try:
-                    self.anthropic_client = anthropic.Anthropic(
-                        api_key=settings.anthropic_api_key
-                    )
-                except TypeError as te:
-                    # If there's a TypeError, try with minimal parameters
-                    logger.info(
-                        f"Trying alternative Anthropic initialization due to: {te}"
-                    )
-                    self.anthropic_client = anthropic.Client(
-                        api_key=settings.anthropic_api_key
-                    )
+                self.anthropic_client = anthropic.Anthropic(
+                    api_key=settings.anthropic_api_key
+                )
             except Exception as e:
                 logger.warning(f"Failed to initialize Anthropic client: {str(e)}")
                 self.anthropic_client = None
@@ -194,22 +184,16 @@ class AIService:
             )
 
             # Call the AI service
-            if self.ai_provider == "gemini":
-                return await self._call_gemini_api_with_system(
-                    prompt_data["system"], enhanced_prompt, image_data
-                )
-            elif self.ai_provider == "anthropic":
+            if self.anthropic_client:
                 return await self._call_anthropic_api_with_system(
-                    prompt_data["system"], enhanced_prompt, image_data
-                )
-            elif self.ai_provider == "openai":
-                return await self._call_openai_api_with_system(
                     prompt_data["system"], enhanced_prompt, image_data
                 )
             elif self.ai_provider == "none":
                 return self._get_fallback_analysis(filename, file_type)
             else:
-                raise ValueError(f"Unsupported AI provider: {self.ai_provider}")
+                raise ValueError(
+                    f"Anthropic client not available for unified analysis."
+                )
 
         except Exception as e:
             logger.error(f"Error in unified analysis: {str(e)}")
@@ -719,11 +703,17 @@ class AIService:
                 if isinstance(mappings, list):
                     for mapping in mappings:
                         if isinstance(mapping, dict):
-                            if "verbatim_term" in mapping:
+                            if "verbatim_term" in mapping and mapping["verbatim_term"]:
                                 keywords.append(mapping["verbatim_term"])
-                            if "mapped_canonical_term" in mapping:
+                            if (
+                                "mapped_canonical_term" in mapping
+                                and mapping["mapped_canonical_term"]
+                            ):
                                 keywords.append(mapping["mapped_canonical_term"])
-                            if "mapped_primary_category" in mapping:
+                            if (
+                                "mapped_primary_category" in mapping
+                                and mapping["mapped_primary_category"]
+                            ):
                                 categories.append(mapping["mapped_primary_category"])
 
             # Handle modular analysis format
@@ -737,11 +727,20 @@ class AIService:
                     if isinstance(mappings, list):
                         for mapping in mappings:
                             if isinstance(mapping, dict):
-                                if "verbatim_term" in mapping:
+                                if (
+                                    "verbatim_term" in mapping
+                                    and mapping["verbatim_term"]
+                                ):
                                     keywords.append(mapping["verbatim_term"])
-                                if "mapped_canonical_term" in mapping:
+                                if (
+                                    "mapped_canonical_term" in mapping
+                                    and mapping["mapped_canonical_term"]
+                                ):
                                     keywords.append(mapping["mapped_canonical_term"])
-                                if "mapped_primary_category" in mapping:
+                                if (
+                                    "mapped_primary_category" in mapping
+                                    and mapping["mapped_primary_category"]
+                                ):
                                     categories.append(
                                         mapping["mapped_primary_category"]
                                     )

@@ -99,6 +99,27 @@ class SearchService:
                     "keywords": doc.get_keyword_list(),
                     "preview_url": preview_url,
                     "file_type": doc.get_metadata("file_type", "unknown"),
+                    "document_type": (
+                        doc.ai_analysis.get("document_analysis", {}).get(
+                            "document_type"
+                        )
+                        if doc.ai_analysis
+                        else None
+                    ),
+                    "campaign_type": (
+                        doc.ai_analysis.get("document_analysis", {}).get(
+                            "campaign_type"
+                        )
+                        if doc.ai_analysis
+                        else None
+                    ),
+                    "document_tone": (
+                        doc.ai_analysis.get("document_analysis", {}).get(
+                            "document_tone"
+                        )
+                        if doc.ai_analysis
+                        else None
+                    ),
                 }
                 formatted_docs.append(formatted_doc)
 

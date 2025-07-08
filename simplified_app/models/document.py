@@ -118,6 +118,13 @@ class Document(Base):
         if analysis.get("content_analysis"):
             search_parts.append(analysis["content_analysis"])
 
+        # Add keywords and categories to search content
+        if self.keywords:
+            if self.keywords.get("keywords"):
+                search_parts.extend(self.keywords["keywords"])
+            if self.keywords.get("categories"):
+                search_parts.extend(self.keywords["categories"])
+
         self.search_content = " ".join(search_parts)
 
     def set_keywords(self, keywords: List[str], categories: List[str] = None):
@@ -126,6 +133,23 @@ class Document(Base):
             "keywords": keywords if isinstance(keywords, list) else [],
             "categories": categories if isinstance(categories, list) else [],
         }
+
+        # Update search content
+        search_parts = []
+        if self.extracted_text:
+            search_parts.append(self.extracted_text)
+        if self.ai_analysis and self.ai_analysis.get("summary"):
+            search_parts.append(self.ai_analysis.get("summary"))
+        if self.ai_analysis and self.ai_analysis.get("content_analysis"):
+            search_parts.append(self.ai_analysis.get("content_analysis"))
+
+        if self.keywords:
+            if self.keywords.get("keywords"):
+                search_parts.extend(self.keywords["keywords"])
+            if self.keywords.get("categories"):
+                search_parts.extend(self.keywords["categories"])
+
+        self.search_content = " ".join(search_parts)
 
     def set_metadata(self, **metadata):
         """Set document metadata"""

@@ -144,6 +144,7 @@ endblock %} {% block content %}
             <span class="filename"></span>
           </h6>
           <p class="card-text summary text-muted"></p>
+          <div class="extra-info mb-2"></div>
           <div class="keywords mb-2"></div>
           <div class="d-flex justify-content-between align-items-center">
             <small class="text-muted">
@@ -320,8 +321,35 @@ endblock %} {% block content %}
         card.find(".preview-image").attr("src", "/static/placeholder.svg");
       }
 
-      // Add keywords
       const keywordsContainer = card.find(".keywords");
+      // Add keywords
+      if (doc.keywords && doc.keywords.length > 0) {
+        doc.keywords.forEach((keyword) => {
+          keywordsContainer.append(`
+                    <span class="badge bg-secondary keyword-badge me-1">${keyword}</span>
+                `);
+        });
+      }
+
+      // Add extra info
+      const extraInfoContainer = card.find(".extra-info");
+      if (doc.document_type) {
+        extraInfoContainer.append(`
+            <span class="badge bg-primary me-1">${doc.document_type}</span>
+        `);
+      }
+      if (doc.campaign_type) {
+        extraInfoContainer.append(`
+            <span class="badge bg-success me-1">${doc.campaign_type}</span>
+        `);
+      }
+      if (doc.document_tone) {
+        extraInfoContainer.append(`
+            <span class="badge bg-warning me-1">${doc.document_tone}</span>
+        `);
+      }
+
+      // Add keywords
       if (doc.keywords && doc.keywords.length > 0) {
         doc.keywords.forEach((keyword) => {
           keywordsContainer.append(`
